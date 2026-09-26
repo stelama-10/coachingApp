@@ -113,13 +113,17 @@ else:
             
             for es in esercizi_assegnati:
                 if dati_input[es]["serie"] > 0:
+                    
+                    # Calcolo del tonnellaggio in Python
+                    tonnellaggio = dati_input[es]["serie"] * dati_input[es]["rip"] * dati_input[es]["kg"]
+                    
                     nuova_riga = [
                         str(data_sessione),             
                         es,                             
                         dati_input[es]["serie"],        
                         dati_input[es]["rip"],          
                         dati_input[es]["kg"],           
-                        "", # Tonnellaggio gestito eventualmente dalle formule su Excel
+                        tonnellaggio, # <-- Ora inserisce il valore numerico calcolato
                         dati_input[es]["rpe"],          
                         dati_input[es]["feed"]          
                     ]
