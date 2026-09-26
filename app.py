@@ -1,86 +1,114 @@
 import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
-from datetime import datetime
+import datetime
 
-st.set_page_config(page_title="Diario Allenamento", page_icon="🏋️", layout="centered")
+# --- AUTENTICAZIONE GIA' EFFETTUATA IN ALTO ---
+# spreadsheet = client.open_by_key(ID_FOGLIO)
 
-@st.cache_resource
-def ottieni_client_google():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    # In cloud le credenziali vengono lette dai "Secrets" di Streamlit
-    credenziali = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=scopes
-    )
-    return gspread.authorize(credenziali)
+# 1. Definisci i fogli
+sheet_programma = spreadsheet.get_worksheet(0) # Programma Coach
+# In base al tuo file di esempio, le risposte andranno nel Diario
+sheet_storico = spreadsheet.worksheet("Diario Atleta") 
 
-st.title("🏋️ Il tuo Diario di Allenamento")
+# 2. Estrazione dati dal Foglio Google
+# Estraiamo tutta la griglia per evitare problemi con le righe vuote iniziali
+dati_programma = sheet_programma.get_all_values()
 
-id_foglio = st.query_params.get("id")
+# Trova dinamicamente la riga di intestazione e gli indici delle colonne
+riga_header = -1
+idx_es = -1
+idx_giorno = -1
 
-if not id_foglio:
-    st.warning("⚠️ Nessun ID rilevato. Accedi tramite il link personalizzato fornito dal tuo coach.")
+for i, riga in enumerate(dati_programma):
+    if "Esercizio" in riga and "Giorno" in riga:
+        riga_header = i
+        idx_es = riga.index("Esercizio")
+        idx_giorno = riga.index("Giorno")
+        break
+
+# Arresta l'app se le colonne non vengono trovate
+if riga_header == -1:
+    st.error("Errore: Impossibile trovare le colonne 'Esercizio' e 'Giorno' nel file.")
     st.stop()
 
-st.write("Compila i campi a fine serie per registrare i tuoi progressi.")
+# Raccoglie tutti gli esercizi e mappa i "giorni" disponibili (A, B, C...)
+esercizi_totali = []
+giorni_disponibili = set()
 
-with st.form("form_allenamento", clear_on_submit=True):
-    data_oggi = st.date_input("Data della sessione", datetime.today())
-    
-    esercizio = st.selectbox("Esercizio", [
-        "Squat Bilanciere", "Panca Piana Bilanciere", "Stacco da Terra", 
-        "Lat Machine Avanti", "Rematore Bilanciere", "Spinte Manubri Inclinata", "Leg Press 45°"
-    ])
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        serie = st.number_input("Serie Fatte", min_value=1, step=1)
-    with col2:
-        reps = st.number_input("Ripetizioni Fatte", min_value=1, step=1)
-    with col3:
-        kg = st.number_input("Kg Sollevati", min_value=0.0, step=0.5)
+for riga in dati_programma[riga_header+1:]:
+    # Evita gli errori sulle righe vuote o tagliate
+    if len(riga) > max(idx_es, idx_giorno): 
+        nome = riga[idx_es].strip()
+        giorno = riga[idx_giorno].strip().upper()
         
-    rpe = st.slider("RPE Percepito (Fatica da 1 a 10)", min_value=1.0, max_value=10.0, value=8.0, step=0.5)
+        if nome != "":
+            esercizi_totali.append({"nome": nome, "giorno": giorno})
+            if giorno != "":
+                giorni_disponibili.add(giorno)
+
+giorni_disponibili = sorted(list(giorni_disponibili))
+
+# 3. Interfaccia utente - SELEZIONE SCHEDA
+st.write("### Registra la sessione di oggi")
+data_sessione = st.date_input("Data della sessione", datetime.date.today())
+
+if not giorni_disponibili:
+    st.warning("Non ci sono esercizi assegnati o manca la lettera del 'Giorno' nel programma.")
+else:
+    # L'utente sceglie la scheda prima di aprire il form
+    giorno_scelto = st.selectbox("Quale scheda (Giorno) vuoi allenare oggi?", giorni_disponibili)
     
-    feedback = st.text_area("Feedback / Dolori (Opzionale)", placeholder="Es. Ottima spinta, leggero fastidio al polso.")
+    # Estraiamo solo gli esercizi corrispondenti al giorno selezionato
+    esercizi_assegnati = [es["nome"] for es in esercizi_totali if es["giorno"] == giorno_scelto]
     
-    submitted = st.form_submit_button("Salva Allenamento 💾", use_container_width=True)
-    
-    if submitted:
-        try:
-            client = ottieni_client_google()
-            foglio = client.open_by_key(id_foglio)
-            scheda_diario = foglio.worksheet("Diario Atleta") 
+    st.info(f"Mostrando gli esercizi per la Scheda: **{giorno_scelto}**")
+
+    # 4. Form Unico per il salvataggio
+    with st.form("form_allenamento_completo"):
+        dati_input = {}
+        
+        for es in esercizi_assegnati:
+            st.markdown(f"**{es}**")
+            col1, col2, col3 = st.columns(3)
             
-            data_str = data_oggi.strftime("%d/%m/%Y")
+            with col1:
+                serie = st.number_input("Serie fatte", min_value=0, step=1, key=f"serie_{es}")
+            with col2:
+                rip = st.number_input("Ripetizioni", min_value=0, step=1, key=f"rip_{es}")
+            with col3:
+                kg = st.number_input("Kg Sollevati", min_value=0.0, step=0.5, key=f"kg_{es}")
+                
+            rpe = st.slider("RPE Percepito", 1, 10, 8, key=f"rpe_{es}")
+            feedback = st.text_input("Feedback / Dolori (Opzionale)", key=f"feed_{es}")
+            st.divider()
             
-            # --- CALCOLO TONNELLAGGIO IN PYTHON ---
-            # Calcoliamo il volume totale prima di inviare i dati
-            tonnellaggio = serie * reps * kg
+            # Salvataggio temporaneo nel dizionario
+            dati_input[es] = {
+                "serie": serie, "rip": rip, "kg": kg, "rpe": rpe, "feed": feedback
+            }
             
-            nuova_riga = [
-                data_str, 
-                esercizio, 
-                serie,                        
-                reps,                         
-                str(kg).replace(".", ","),    
-                str(tonnellaggio).replace(".", ","),  # Sostituisce la formula con il valore reale
-                str(rpe).replace(".", ","),   
-                feedback                      
-            ]
+        submit_btn = st.form_submit_button("💾 Salva Intero Allenamento")
+        
+        # 5. Invio massivo a Google Fogli
+        if submit_btn:
+            righe_da_inserire = []
             
-            scheda_diario.append_row(nuova_riga, value_input_option='USER_ENTERED')
+            for es in esercizi_assegnati:
+                # Salva l'esercizio solo se è stata registrata almeno una serie
+                if dati_input[es]["serie"] > 0:
+                    nuova_riga = [
+                        str(data_sessione),             
+                        es,                             
+                        dati_input[es]["serie"],        
+                        dati_input[es]["rip"],          
+                        dati_input[es]["kg"],           
+                        "", # Tonnellaggi - lasciato vuoto se calcolato da Fogli  
+                        dati_input[es]["rpe"],          
+                        dati_input[es]["feed"]          
+                    ]
+                    righe_da_inserire.append(nuova_riga)
             
-            st.success(f"Dati salvati con successo per {esercizio}!")
-            st.balloons()
-            
-        except gspread.exceptions.APIError as e:
-            st.error(f"Errore di comunicazione con Google: {e}")
-        except gspread.exceptions.WorksheetNotFound:
-            st.error("La scheda 'Diario Atleta' non è stata trovata in questo foglio.")
-        except Exception as e:
-            st.error(f"Si è verificato un errore: {e}")
+            if len(righe_da_inserire) > 0:
+                sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
+                st.success(f"✅ Scheda {giorno_scelto} salvata! Registrati {len(righe_da_inserire)} esercizi.")
+            else:
+                st.warning("⚠️ Non hai compilato nessuna serie. Nessun dato è stato salvato.")
