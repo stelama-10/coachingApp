@@ -82,7 +82,6 @@ if st.session_state.dati_salvati:
     st.markdown("<p style='text-align: center; color: gray;'>Puoi chiudere questa pagina in sicurezza. Per inserire nuovi dati, ricarica la pagina o riapri il link.</p>", unsafe_allow_html=True)
 
 # ALTRIMENTI -> MOSTRA IL NORMALE FORM DI INSERIMENTO
-# ALTRIMENTI -> MOSTRA IL NORMALE FORM DI INSERIMENTO
 else:
     st.write("### Registra la sessione di oggi")
     data_sessione = st.date_input("Data della sessione", datetime.date.today())
@@ -101,7 +100,7 @@ else:
             
             # --- RPE GLOBALE PER L'INTERA SESSIONE ---
             rpe_globale = st.slider(
-                "Fatica percepita (10=fatica massima 0=nessuna fatica)", 
+                "Fatica percepita (10 = fatica massima, 0 = nessuna fatica)", 
                 min_value=0.0, 
                 max_value=10.0, 
                 value=7.0, 
