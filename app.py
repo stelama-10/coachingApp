@@ -83,7 +83,7 @@ else:
     st.info(f"Mostrando gli esercizi per la Scheda: **{giorno_scelto}**")
 
     # Form Unico per il salvataggio
-    with st.form("form_allenamento_completo"):
+    with st.form("form_allenamento_completo", enter_to_submit=False):
         dati_input = {}
         
         for es in esercizi_assegnati:
@@ -137,7 +137,7 @@ else:
                     st.success(f"✅ Ottimo lavoro! Scheda {giorno_scelto} salvata con {len(righe_da_inserire)} esercizi completati.")
                     
                     # La nuova notifica animata (Toast)
-                    st.toast(f'Dati della scheda {giorno_scelto} inviati al coach! 🏋️‍♂️', icon='🔥')
+                    st.toast(f'Dati della scheda {giorno_scelto} inviati al coach!', icon='✅')
                     
                 except Exception as e:
                     st.error(f"Errore durante il salvataggio dei dati sul foglio: {e}")
