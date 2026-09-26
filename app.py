@@ -82,6 +82,7 @@ if st.session_state.dati_salvati:
     st.markdown("<p style='text-align: center; color: gray;'>Puoi chiudere questa pagina in sicurezza. Per inserire nuovi dati, ricarica la pagina o riapri il link.</p>", unsafe_allow_html=True)
 
 # ALTRIMENTI -> MOSTRA IL NORMALE FORM DI INSERIMENTO
+# ALTRIMENTI -> MOSTRA IL NORMALE FORM DI INSERIMENTO
 else:
     st.write("### Registra la sessione di oggi")
     data_sessione = st.date_input("Data della sessione", datetime.date.today())
@@ -97,6 +98,17 @@ else:
 
         # Form Unico (con enter_to_submit=False per evitare invii accidentali)
         with st.form("form_allenamento_completo", enter_to_submit=False):
+            
+            # --- RPE GLOBALE PER L'INTERA SESSIONE ---
+            rpe_globale = st.slider(
+                "Fatica percepita (10=fatica massima 0=nessuna fatica)", 
+                min_value=0.0, 
+                max_value=10.0, 
+                value=7.0, 
+                step=0.5
+            )
+            st.divider()
+
             dati_input = {}
             
             for es in esercizi_assegnati:
@@ -110,12 +122,11 @@ else:
                 with col3:
                     kg = st.number_input("Kg Sollevati", min_value=0.0, step=0.5, key=f"kg_{es}")
                     
-                rpe = st.slider("RPE Percepito", 1, 10, 8, key=f"rpe_{es}")
                 feedback = st.text_input("Feedback / Dolori (Opzionale)", key=f"feed_{es}")
                 st.divider()
                 
                 dati_input[es] = {
-                    "serie": serie, "rip": rip, "kg": kg, "rpe": rpe, "feed": feedback
+                    "serie": serie, "rip": rip, "kg": kg, "feed": feedback
                 }
                 
             submit_btn = st.form_submit_button("💾 Salva Intero Allenamento")
@@ -136,7 +147,7 @@ else:
                             dati_input[es]["rip"],          
                             dati_input[es]["kg"],           
                             tonnellaggio,
-                            dati_input[es]["rpe"],          
+                            rpe_globale,  # RPE unico assegnato a tutte le righe        
                             dati_input[es]["feed"]          
                         ]
                         righe_da_inserire.append(nuova_riga)
