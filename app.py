@@ -123,7 +123,7 @@ else:
                         dati_input[es]["serie"],        
                         dati_input[es]["rip"],          
                         dati_input[es]["kg"],           
-                        tonnellaggio, # <-- Ora inserisce il valore numerico calcolato
+                        tonnellaggio,
                         dati_input[es]["rpe"],          
                         dati_input[es]["feed"]          
                     ]
@@ -132,7 +132,8 @@ else:
             if len(righe_da_inserire) > 0:
                 try:
                     sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
-                    st.success(f"✅ Scheda {giorno_scelto} salvata! Registrati {len(righe_da_inserire)} esercizi.")
+                    st.success(f"✅ Ottimo lavoro! Scheda {giorno_scelto} salvata con {len(righe_da_inserire)} esercizi completati.")
+                    st.balloons() # <-- Animazione di successo
                 except Exception as e:
                     st.error(f"Errore durante il salvataggio dei dati sul foglio: {e}")
             else:
