@@ -1,19 +1,43 @@
 import streamlit as st
 import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 
-# --- AUTENTICAZIONE GIA' EFFETTUATA IN ALTO ---
-# spreadsheet = client.open_by_key(ID_FOGLIO)
+# --- 1. AUTENTICAZIONE GOOGLE ---
+try:
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    client = gspread.authorize(credentials)
+except Exception as e:
+    st.error("Errore di autenticazione con Google. Controlla le chiavi segrete.")
+    st.stop()
 
-# 1. Definisci i fogli
-sheet_programma = spreadsheet.get_worksheet(0) # Programma Coach
-# In base al tuo file di esempio, le risposte andranno nel Diario
-sheet_storico = spreadsheet.worksheet("Diario Atleta") 
+# --- 2. RECUPERO ID FOGLIO DALL'URL ---
+# Legge il parametro ?id=... dal link
+if "id" not in st.query_params:
+    st.error("Nessun ID foglio trovato nell'URL. Assicurati di aprire il link dalla tua App Flet (CRM).")
+    st.stop()
+    
+id_foglio = st.query_params["id"]
 
-# 2. Estrazione dati dal Foglio Google
-# Estraiamo tutta la griglia per evitare problemi con le righe vuote iniziali
+try:
+    spreadsheet = client.open_by_key(id_foglio)
+except Exception as e:
+    st.error(f"Impossibile accedere al foglio. Assicurati che l'email del bot sia impostata come Editor. Dettagli: {e}")
+    st.stop()
+
+# --- 3. DEFINIZIONE DEI FOGLI ---
+try:
+    sheet_programma = spreadsheet.get_worksheet(0) # Programma Coach (la primissima scheda in basso a sinistra)
+    sheet_storico = spreadsheet.worksheet("Diario Atleta") # La scheda dove verranno scritte le risposte
+except Exception as e:
+    st.error(f"Errore: Impossibile trovare 'Diario Atleta'. Controlla che le schede nel file Excel si chiamino correttamente. Errore: {e}")
+    st.stop()
+
+# --- 4. ESTRAZIONE DATI DAL FOGLIO PROGRAMMA ---
+# Scarica tutta la griglia per cercare le colonne "Esercizio" e "Giorno"
 dati_programma = sheet_programma.get_all_values()
 
-# Trova dinamicamente la riga di intestazione e gli indici delle colonne
 riga_header = -1
 idx_es = -1
 idx_giorno = -1
@@ -25,17 +49,15 @@ for i, riga in enumerate(dati_programma):
         idx_giorno = riga.index("Giorno")
         break
 
-# Arresta l'app se le colonne non vengono trovate
 if riga_header == -1:
-    st.error("Errore: Impossibile trovare le colonne 'Esercizio' e 'Giorno' nel file.")
+    st.error("Errore: Impossibile trovare le colonne 'Esercizio' e 'Giorno' nel file. Controlla le intestazioni.")
     st.stop()
 
-# Raccoglie tutti gli esercizi e mappa i "giorni" disponibili (A, B, C...)
 esercizi_totali = []
 giorni_disponibili = set()
 
+# Estrae solo gli esercizi validi
 for riga in dati_programma[riga_header+1:]:
-    # Evita gli errori sulle righe vuote o tagliate
     if len(riga) > max(idx_es, idx_giorno): 
         nome = riga[idx_es].strip()
         giorno = riga[idx_giorno].strip().upper()
@@ -47,22 +69,20 @@ for riga in dati_programma[riga_header+1:]:
 
 giorni_disponibili = sorted(list(giorni_disponibili))
 
-# 3. Interfaccia utente - SELEZIONE SCHEDA
+# --- 5. INTERFACCIA UTENTE E FORM STREAMLIT ---
 st.write("### Registra la sessione di oggi")
 data_sessione = st.date_input("Data della sessione", datetime.date.today())
 
 if not giorni_disponibili:
     st.warning("Non ci sono esercizi assegnati o manca la lettera del 'Giorno' nel programma.")
 else:
-    # L'utente sceglie la scheda prima di aprire il form
+    # L'utente seleziona la scheda (A, B, C...)
     giorno_scelto = st.selectbox("Quale scheda (Giorno) vuoi allenare oggi?", giorni_disponibili)
-    
-    # Estraiamo solo gli esercizi corrispondenti al giorno selezionato
     esercizi_assegnati = [es["nome"] for es in esercizi_totali if es["giorno"] == giorno_scelto]
     
     st.info(f"Mostrando gli esercizi per la Scheda: **{giorno_scelto}**")
 
-    # 4. Form Unico per il salvataggio
+    # Form Unico per il salvataggio
     with st.form("form_allenamento_completo"):
         dati_input = {}
         
@@ -81,19 +101,17 @@ else:
             feedback = st.text_input("Feedback / Dolori (Opzionale)", key=f"feed_{es}")
             st.divider()
             
-            # Salvataggio temporaneo nel dizionario
             dati_input[es] = {
                 "serie": serie, "rip": rip, "kg": kg, "rpe": rpe, "feed": feedback
             }
             
         submit_btn = st.form_submit_button("💾 Salva Intero Allenamento")
         
-        # 5. Invio massivo a Google Fogli
+        # Invio massivo a Google Fogli
         if submit_btn:
             righe_da_inserire = []
             
             for es in esercizi_assegnati:
-                # Salva l'esercizio solo se è stata registrata almeno una serie
                 if dati_input[es]["serie"] > 0:
                     nuova_riga = [
                         str(data_sessione),             
@@ -101,14 +119,17 @@ else:
                         dati_input[es]["serie"],        
                         dati_input[es]["rip"],          
                         dati_input[es]["kg"],           
-                        "", # Tonnellaggi - lasciato vuoto se calcolato da Fogli  
+                        "", # Tonnellaggio gestito eventualmente dalle formule su Excel
                         dati_input[es]["rpe"],          
                         dati_input[es]["feed"]          
                     ]
                     righe_da_inserire.append(nuova_riga)
             
             if len(righe_da_inserire) > 0:
-                sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
-                st.success(f"✅ Scheda {giorno_scelto} salvata! Registrati {len(righe_da_inserire)} esercizi.")
+                try:
+                    sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
+                    st.success(f"✅ Scheda {giorno_scelto} salvata! Registrati {len(righe_da_inserire)} esercizi.")
+                except Exception as e:
+                    st.error(f"Errore durante il salvataggio dei dati sul foglio: {e}")
             else:
                 st.warning("⚠️ Non hai compilato nessuna serie. Nessun dato è stato salvato.")
