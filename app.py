@@ -132,8 +132,13 @@ else:
             if len(righe_da_inserire) > 0:
                 try:
                     sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
+                    
+                    # Il messaggio verde fisso
                     st.success(f"✅ Ottimo lavoro! Scheda {giorno_scelto} salvata con {len(righe_da_inserire)} esercizi completati.")
-                    st.balloons() # <-- Animazione di successo
+                    
+                    # La nuova notifica animata (Toast)
+                    st.toast(f'Dati della scheda {giorno_scelto} inviati al coach! 🏋️‍♂️', icon='🔥')
+                    
                 except Exception as e:
                     st.error(f"Errore durante il salvataggio dei dati sul foglio: {e}")
             else:
