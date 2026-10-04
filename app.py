@@ -2,41 +2,10 @@ import streamlit as st
 import datetime
 import gspread
 from google.oauth2.service_account import Credentials
+from streamlit_cookies_controller import CookieController
 
-# 1. AGGIUNGI QUESTA CONFIGURAZIONE (Deve essere il primo comando Streamlit in assoluto)
-st.set_page_config(
-    page_title="Diario Allenamento", 
-    page_icon="🏋️", 
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
-
-# Bottone per le istruzioni di installazione
-if st.button("📲 Salva come app sul dispositivo"):
-    st.info("""
-    **Come salvare l'app sulla tua Home:**
-    
-    🍏 **Se hai un iPhone (Safari):** 
-    1. Tocca l'icona **Condividi** (il quadrato con la freccia verso l'alto) nella barra in basso.
-    2. Scorri il menu verso il basso e seleziona **"Aggiungi alla schermata Home"**.
-    
-    🤖 **Se hai Android (Chrome):**
-    1. Tocca i **tre puntini** in alto a destra.
-    2. Seleziona **"Aggiungi a schermata Home"** o "Installa app".
-    """)
-
-# 2. INIETTA META TAG E STILI PER DISPOSITIVI MOBILI (Opzionale ma consigliato)
-st.markdown("""
-    <style>
-        /* Nasconde il menu in alto e il footer di Streamlit per farla sembrare un'app vera */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
-    </style>
-    <!-- Forza il telefono a trattare la pagina come un'app nativa -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-""", unsafe_allow_html=True)
+# Inizializza i cookie (deve essere tra le primissime righe)
+controller = CookieController()
 
 # --- 1. AUTENTICAZIONE GOOGLE ---
 try:
@@ -47,38 +16,42 @@ except Exception as e:
     st.error("Errore di autenticazione con Google. Controlla le chiavi segrete.")
     st.stop()
 
-# --- 2. RECUPERO ID FOGLIO DALL'URL E PERSISTENZA ---
+# --- 2. RECUPERO ID (CON MEMORIA PERMANENTE) ---
+id_foglio = None
 
-# Se l'ID è presente nell'URL, lo salviamo nello stato della sessione
+# Caso A: C'è l'ID nell'URL (es. l'atleta ha appena cliccato il link da WhatsApp)
 if "id" in st.query_params:
-    st.session_state["id_foglio"] = st.query_params["id"]
+    id_foglio = st.query_params["id"]
+    # Salviamo l'ID in modo permanente nel telefono (durata: 1 anno)
+    controller.set("id_salvato", id_foglio, max_age=31536000)
 
-# Recuperiamo l'ID dallo stato o dai parametri
-id_foglio = st.session_state.get("id_foglio", None)
-
+# Caso B: Nessun URL (l'app è stata aperta dalla Home dell'iPhone), peschiamo dal Cookie
 if not id_foglio:
-    st.error("Nessun ID foglio trovato nell'URL. Assicurati di aprire il link originale fornito dal coach.")
-    # Permette all'atleta di reinserire il proprio ID o link una volta sola se Safari lo perde
-    recupero_id = st.text_input("Se hai aperto l'app dalla schermata Home, incolla qui il link o l'ID della tua scheda:")
-    if recupero_id:
-        if "/d/" in recupero_id:
-            id_foglio = recupero_id.split("/d/")[1].split("/")[0]
-        elif "?id=" in recupero_id:
-            id_foglio = recupero_id.split("?id=")[1].split("&")[0]
-        else:
-            id_foglio = recupero_id.strip()
-        st.session_state["id_foglio"] = id_foglio
-        st.query_params["id"] = id_foglio
-        st.rerun()
-    st.stop()
+    id_foglio = controller.get("id_salvato")
 
-try:
-    spreadsheet = client.open_by_key(id_foglio)
-except Exception as e:
-    st.error(f"Impossibile accedere al foglio. Assicurati che l'email del bot sia impostata come Editor. Dettagli: {e}")
+# Caso C: Primo avvio assoluto dalla Home (chiediamo il link UNA SOLA VOLTA)
+if not id_foglio:
+    st.warning("⚠️ Configurazione iniziale richiesta (da fare una sola volta).")
+    st.write("Hai salvato l'app sulla schermata Home. Per collegarla definitivamente alla tua scheda, incolla qui sotto il link che ti ha mandato il coach.")
+    
+    link_incollato = st.text_input("Incolla qui il link dell'App o del Foglio Google:")
+    
+    if st.button("Salva e Collega App"):
+        # Estraiamo l'ID in modo intelligente da qualsiasi cosa incolli l'atleta
+        if "?id=" in link_incollato:
+            id_estratto = link_incollato.split("?id=")[1].split("&")[0]
+        elif "/d/" in link_incollato:
+            id_estratto = link_incollato.split("/d/")[1].split("/")[0]
+        else:
+            id_estratto = link_incollato.strip()
+            
+        # Salviamo il cookie e diamo l'ok
+        controller.set("id_salvato", id_estratto, max_age=31536000)
+        st.success("✅ App collegata con successo! Chiudi questa pagina e riapri l'app dalla Home.")
     st.stop()
 
 # --- 3. DEFINIZIONE DEI FOGLI ---
+# ... (il resto del tuo codice rimane identico)
 try:
     sheet_programma = spreadsheet.get_worksheet(0) # Programma Coach (la primissima scheda in basso a sinistra)
     sheet_storico = spreadsheet.worksheet("Diario Atleta") # La scheda dove verranno scritte le risposte
