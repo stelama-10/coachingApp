@@ -15,16 +15,41 @@ st.set_page_config(
 # 2. INIZIALIZZA IL CONTROLLER DEI COOKIE (Subito dopo la configurazione)
 controller = CookieController()
 
-# 3. STILI DISPOSITIVI MOBILI
-st.markdown("""
-    <style>
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
-    </style>
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-""", unsafe_allow_html=True)
+# --- BANNER INSTALLAZIONE INTELLIGENTE ---
+    st.markdown("""
+        <style>
+            /* Disegna il banner visibile nel browser */
+            .pwa-banner {
+                background: linear-gradient(135deg, #0ea5e9, #2563eb);
+                color: white;
+                padding: 15px;
+                border-radius: 10px;
+                margin-bottom: 20px;
+                font-size: 14px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                text-align: center;
+            }
+            
+            /* IL TRUCCO: Se l'app viene eseguita dalla Home (standalone), nascondi tutto */
+            @media all and (display-mode: standalone) {
+                .pwa-banner {
+                    display: none !important;
+                }
+            }
+            
+            /* Copertura extra per vecchie versioni di iOS */
+            @media all and (display-mode: fullscreen) {
+                .pwa-banner {
+                    display: none !important;
+                }
+            }
+        </style>
+
+        <div class="pwa-banner">
+            📲 <b>Salva l'app sul telefono!</b><br><br>
+            Tocca l'icona di condivisione del browser ( 📤 ) e seleziona <b>"Aggiungi alla schermata Home"</b> per non perdere la tua scheda.
+        </div>
+    """, unsafe_allow_html=True)
 
 # --- 1. AUTENTICAZIONE GOOGLE ---
 try:
