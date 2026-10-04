@@ -3,6 +3,41 @@ import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
+# 1. AGGIUNGI QUESTA CONFIGURAZIONE (Deve essere il primo comando Streamlit in assoluto)
+st.set_page_config(
+    page_title="Diario Allenamento", 
+    page_icon="🏋️", 
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
+# Bottone per le istruzioni di installazione
+if st.button("📲 Salva come app sul dispositivo"):
+    st.info("""
+    **Come salvare l'app sulla tua Home:**
+    
+    🍏 **Se hai un iPhone (Safari):** 
+    1. Tocca l'icona **Condividi** (il quadrato con la freccia verso l'alto) nella barra in basso.
+    2. Scorri il menu verso il basso e seleziona **"Aggiungi alla schermata Home"**.
+    
+    🤖 **Se hai Android (Chrome):**
+    1. Tocca i **tre puntini** in alto a destra.
+    2. Seleziona **"Aggiungi a schermata Home"** o "Installa app".
+    """)
+
+# 2. INIETTA META TAG E STILI PER DISPOSITIVI MOBILI (Opzionale ma consigliato)
+st.markdown("""
+    <style>
+        /* Nasconde il menu in alto e il footer di Streamlit per farla sembrare un'app vera */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+    </style>
+    <!-- Forza il telefono a trattare la pagina come un'app nativa -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+""", unsafe_allow_html=True)
+
 # --- 1. AUTENTICAZIONE GOOGLE ---
 try:
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -38,6 +73,7 @@ except Exception as e:
 # Scarica tutta la griglia per cercare le colonne "Esercizio" e "Giorno"
 dati_programma = sheet_programma.get_all_values()
 
+# Trova dinamicamente la riga di intestazione e gli indici delle colonne
 riga_header = -1
 idx_es = -1
 idx_giorno = -1
@@ -49,15 +85,17 @@ for i, riga in enumerate(dati_programma):
         idx_giorno = riga.index("Giorno")
         break
 
+# Arresta l'app se le colonne non vengono trovate
 if riga_header == -1:
-    st.error("Errore: Impossibile trovare le colonne 'Esercizio' e 'Giorno' nel file. Controlla le intestazioni.")
+    st.error("Errore: Impossibile trovare le colonne 'Esercizio' e 'Giorno' nel file.")
     st.stop()
 
+# Raccoglie tutti gli esercizi e mappa i "giorni" disponibili (A, B, C...)
 esercizi_totali = []
 giorni_disponibili = set()
 
-# Estrae solo gli esercizi validi
 for riga in dati_programma[riga_header+1:]:
+    # Evita gli errori sulle righe vuote o tagliate
     if len(riga) > max(idx_es, idx_giorno): 
         nome = riga[idx_es].strip()
         giorno = riga[idx_giorno].strip().upper()
@@ -69,95 +107,68 @@ for riga in dati_programma[riga_header+1:]:
 
 giorni_disponibili = sorted(list(giorni_disponibili))
 
-# --- 5. INTERFACCIA UTENTE E FORM STREAMLIT ---
+# 3. Interfaccia utente - SELEZIONE SCHEDA
+st.write("### Registra la sessione di oggi")
+data_sessione = st.date_input("Data della sessione", datetime.date.today())
 
-# Inizializza lo stato per capire se il form è stato inviato
-if "dati_salvati" not in st.session_state:
-    st.session_state.dati_salvati = False
-
-# SE I DATI SONO GIA' STATI SALVATI -> MOSTRA SOLO IL MESSAGGIO CENTRATO
-if st.session_state.dati_salvati:
-    st.markdown("<br><br><br>", unsafe_allow_html=True)
-    st.markdown(f"<h2 style='text-align: center;'>Dati della scheda inviati al coach! 🏋️‍♂️🔥</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: gray;'>Puoi chiudere questa pagina in sicurezza. Per inserire nuovi dati, ricarica la pagina o riapri il link.</p>", unsafe_allow_html=True)
-
-# ALTRIMENTI -> MOSTRA IL NORMALE FORM DI INSERIMENTO
+if not giorni_disponibili:
+    st.warning("Non ci sono esercizi assegnati o manca la lettera del 'Giorno' nel programma.")
 else:
-    st.write("### Registra la sessione di oggi")
-    data_sessione = st.date_input("Data della sessione", datetime.date.today())
+    # L'utente sceglie la scheda prima di aprire il form
+    giorno_scelto = st.selectbox("Quale scheda (Giorno) vuoi allenare oggi?", giorni_disponibili)
+    
+    # Estraiamo solo gli esercizi corrispondenti al giorno selezionato
+    esercizi_assegnati = [es["nome"] for es in esercizi_totali if es["giorno"] == giorno_scelto]
+    
+    st.info(f"Mostrando gli esercizi per la Scheda: **{giorno_scelto}**")
 
-    if not giorni_disponibili:
-        st.warning("Non ci sono esercizi assegnati o manca la lettera del 'Giorno' nel programma.")
-    else:
-        # L'utente seleziona la scheda (A, B, C...)
-        giorno_scelto = st.selectbox("Quale scheda (Giorno) vuoi allenare oggi?", giorni_disponibili)
-        esercizi_assegnati = [es["nome"] for es in esercizi_totali if es["giorno"] == giorno_scelto]
+    # 4. Form Unico per il salvataggio
+    with st.form("form_allenamento_completo"):
+        dati_input = {}
         
-        st.info(f"Mostrando gli esercizi per la Scheda: **{giorno_scelto}**")
-
-        # Form Unico (con enter_to_submit=False per evitare invii accidentali)
-        with st.form("form_allenamento_completo", enter_to_submit=False):
+        for es in esercizi_assegnati:
+            st.markdown(f"**{es}**")
+            col1, col2, col3 = st.columns(3)
             
-            # --- RPE GLOBALE PER L'INTERA SESSIONE ---
-            rpe_globale = st.slider(
-                "Fatica percepita (10 = fatica massima, 0 = nessuna fatica)", 
-                min_value=0.0, 
-                max_value=10.0, 
-                value=7.0, 
-                step=0.5
-            )
+            with col1:
+                serie = st.number_input("Serie fatte", min_value=0, step=1, key=f"serie_{es}")
+            with col2:
+                rip = st.number_input("Ripetizioni", min_value=0, step=1, key=f"rip_{es}")
+            with col3:
+                kg = st.number_input("Kg Sollevati", min_value=0.0, step=0.5, key=f"kg_{es}")
+                
+            rpe = st.slider("RPE Percepito", 1, 10, 8, key=f"rpe_{es}")
+            feedback = st.text_input("Feedback / Dolori (Opzionale)", key=f"feed_{es}")
             st.divider()
-
-            dati_input = {}
+            
+            # Salvataggio temporaneo nel dizionario
+            dati_input[es] = {
+                "serie": serie, "rip": rip, "kg": kg, "rpe": rpe, "feed": feedback
+            }
+            
+        submit_btn = st.form_submit_button("💾 Salva Intero Allenamento")
+        
+        # 5. Invio massivo a Google Fogli
+        if submit_btn:
+            righe_da_inserire = []
             
             for es in esercizi_assegnati:
-                st.markdown(f"**{es}**")
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    serie = st.number_input("Serie fatte", min_value=0, step=1, key=f"serie_{es}")
-                with col2:
-                    rip = st.number_input("Ripetizioni", min_value=0, step=1, key=f"rip_{es}")
-                with col3:
-                    kg = st.number_input("Kg Sollevati", min_value=0.0, step=0.5, key=f"kg_{es}")
-                    
-                feedback = st.text_input("Feedback / Dolori (Opzionale)", key=f"feed_{es}")
-                st.divider()
-                
-                dati_input[es] = {
-                    "serie": serie, "rip": rip, "kg": kg, "feed": feedback
-                }
-                
-            submit_btn = st.form_submit_button("💾 Salva Intero Allenamento")
+                # Salva l'esercizio solo se è stata registrata almeno una serie
+                if dati_input[es]["serie"] > 0:
+                    nuova_riga = [
+                        str(data_sessione),             
+                        es,                             
+                        dati_input[es]["serie"],        
+                        dati_input[es]["rip"],          
+                        dati_input[es]["kg"],           
+                        "", # Tonnellaggi - lasciato vuoto se calcolato da Fogli  
+                        dati_input[es]["rpe"],          
+                        dati_input[es]["feed"]          
+                    ]
+                    righe_da_inserire.append(nuova_riga)
             
-            if submit_btn:
-                righe_da_inserire = []
-                
-                for es in esercizi_assegnati:
-                    if dati_input[es]["serie"] > 0:
-                        
-                        # Calcolo del tonnellaggio in Python
-                        tonnellaggio = dati_input[es]["serie"] * dati_input[es]["rip"] * dati_input[es]["kg"]
-                        
-                        nuova_riga = [
-                            str(data_sessione),             
-                            es,                             
-                            dati_input[es]["serie"],        
-                            dati_input[es]["rip"],          
-                            dati_input[es]["kg"],           
-                            tonnellaggio,
-                            rpe_globale,  # RPE unico assegnato a tutte le righe        
-                            dati_input[es]["feed"]          
-                        ]
-                        righe_da_inserire.append(nuova_riga)
-                
-                if len(righe_da_inserire) > 0:
-                    try:
-                        sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
-                        # Salva lo stato e ricarica la pagina per far sparire il form
-                        st.session_state.dati_salvati = True
-                        st.rerun() 
-                    except Exception as e:
-                        st.error(f"Errore durante il salvataggio dei dati sul foglio: {e}")
-                else:
-                    st.warning("⚠️ Non hai compilato nessuna serie. Nessun dato è stato salvato.")
+            if len(righe_da_inserire) > 0:
+                sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
+                st.success(f"✅ Scheda {giorno_scelto} salvata! Registrati {len(righe_da_inserire)} esercizi.")
+            else:
+                st.warning("⚠️ Non hai compilato nessuna serie. Nessun dato è stato salvato.")
