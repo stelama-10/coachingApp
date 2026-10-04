@@ -2,11 +2,9 @@ import streamlit as st
 import datetime
 import gspread
 from google.oauth2.service_account import Credentials
+from streamlit_cookies_controller import CookieController # Libreria per la memoria invisibile
 
-import streamlit as st
-import datetime
-
-# 1. AGGIUNGI QUESTA CONFIGURAZIONE (Deve essere il primo comando Streamlit in assoluto)
+# 1. CONFIGURAZIONE PAGINA
 st.set_page_config(
     page_title="Diario Allenamento", 
     page_icon="🏋️", 
@@ -14,15 +12,16 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 2. INIETTA META TAG E STILI PER DISPOSITIVI MOBILI (Opzionale ma consigliato)
+# 2. INIZIALIZZA IL CONTROLLER DEI COOKIE (Subito dopo la configurazione)
+controller = CookieController()
+
+# 3. STILI DISPOSITIVI MOBILI
 st.markdown("""
     <style>
-        /* Nasconde il menu in alto e il footer di Streamlit per farla sembrare un'app vera */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
     </style>
-    <!-- Forza il telefono a trattare la pagina come un'app nativa -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
 """, unsafe_allow_html=True)
@@ -36,23 +35,34 @@ except Exception as e:
     st.error("Errore di autenticazione con Google. Controlla le chiavi segrete.")
     st.stop()
 
-# --- 2. RECUPERO ID FOGLIO DALL'URL ---
-# Legge il parametro ?id=... dal link
-if "id" not in st.query_params:
-    st.error("Nessun ID foglio trovato nell'URL. Assicurati di aprire il link dalla tua App Flet (CRM).")
+# --- 2. RECUPERO ID FOGLIO (AUTOMATICO DA URL O MEMORIA) ---
+id_foglio = st.query_params.get("id")
+
+if id_foglio:
+    # CASO A: Primo avvio da WhatsApp (l'URL è completo).
+    # Salviamo l'ID in automatico e silenziosamente nel telefono per 1 anno.
+    controller.set("id_salvato", id_foglio, max_age=31536000)
+else:
+    # CASO B: L'app è stata aperta dalla schermata Home dell'iPhone (URL troncato).
+    # Peschiamo l'ID direttamente dalla memoria in background.
+    id_foglio = controller.get("id_salvato")
+
+# Poiché leggere la memoria richiede qualche decimo di secondo, gestiamo l'attesa
+if not id_foglio:
+    st.info("🔄 Sincronizzazione scheda in corso...")
+    st.markdown("<p style='text-align: center; color: gray; font-size: 12px;'>Se la schermata rimane bloccata, assicurati di aver aperto il link originale inviato dal coach almeno una volta.</p>", unsafe_allow_html=True)
     st.stop()
-    
-id_foglio = st.query_params["id"]
 
 try:
     spreadsheet = client.open_by_key(id_foglio)
 except Exception as e:
-    st.error(f"Impossibile accedere al foglio. Assicurati che l'email del bot sia impostata come Editor. Dettagli: {e}")
+    st.error(f"Impossibile accedere al foglio. Dettagli: {e}")
     st.stop()
 
 # --- 3. DEFINIZIONE DEI FOGLI ---
+# (Da qui in poi lascia il tuo codice ESATTAMENTE com'è)
 try:
-    sheet_programma = spreadsheet.get_worksheet(0) # Programma Coach (la primissima scheda in basso a sinistra)
+    sheet_programma = spreadsheet.get_worksheet(0)
     sheet_storico = spreadsheet.worksheet("Diario Atleta") # La scheda dove verranno scritte le risposte
 except Exception as e:
     st.error(f"Errore: Impossibile trovare 'Diario Atleta'. Controlla che le schede nel file Excel si chiamino correttamente. Errore: {e}")
