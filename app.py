@@ -47,13 +47,30 @@ except Exception as e:
     st.error("Errore di autenticazione con Google. Controlla le chiavi segrete.")
     st.stop()
 
-# --- 2. RECUPERO ID FOGLIO DALL'URL ---
-# Legge il parametro ?id=... dal link
-if "id" not in st.query_params:
-    st.error("Nessun ID foglio trovato nell'URL. Assicurati di aprire il link dalla tua App Flet (CRM).")
+# --- 2. RECUPERO ID FOGLIO DALL'URL E PERSISTENZA ---
+
+# Se l'ID è presente nell'URL, lo salviamo nello stato della sessione
+if "id" in st.query_params:
+    st.session_state["id_foglio"] = st.query_params["id"]
+
+# Recuperiamo l'ID dallo stato o dai parametri
+id_foglio = st.session_state.get("id_foglio", None)
+
+if not id_foglio:
+    st.error("Nessun ID foglio trovato nell'URL. Assicurati di aprire il link originale fornito dal coach.")
+    # Permette all'atleta di reinserire il proprio ID o link una volta sola se Safari lo perde
+    recupero_id = st.text_input("Se hai aperto l'app dalla schermata Home, incolla qui il link o l'ID della tua scheda:")
+    if recupero_id:
+        if "/d/" in recupero_id:
+            id_foglio = recupero_id.split("/d/")[1].split("/")[0]
+        elif "?id=" in recupero_id:
+            id_foglio = recupero_id.split("?id=")[1].split("&")[0]
+        else:
+            id_foglio = recupero_id.strip()
+        st.session_state["id_foglio"] = id_foglio
+        st.query_params["id"] = id_foglio
+        st.rerun()
     st.stop()
-    
-id_foglio = st.query_params["id"]
 
 try:
     spreadsheet = client.open_by_key(id_foglio)
