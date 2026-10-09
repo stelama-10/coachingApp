@@ -1,9 +1,9 @@
 import streamlit as st
 import datetime
 import gspread
-import pandas as pd  # <-- NUOVA LIBRERIA AGGIUNTA
+import pandas as pd
 from google.oauth2.service_account import Credentials
-from streamlit_cookies_controller import CookieController # Libreria per la memoria invisibile
+from streamlit_cookies_controller import CookieController
 
 # 1. CONFIGURAZIONE PAGINA
 st.set_page_config(
@@ -13,13 +13,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 2. INIZIALIZZA IL CONTROLLER DEI COOKIE (Subito dopo la configurazione)
+# 2. INIZIALIZZA IL CONTROLLER DEI COOKIE
 controller = CookieController()
 
 # --- BANNER INSTALLAZIONE INTELLIGENTE ---
 st.markdown("""
     <style>
-        /* Disegna il banner visibile nel browser */
         .pwa-banner {
             background: linear-gradient(135deg, #0ea5e9, #2563eb);
             color: white;
@@ -30,22 +29,13 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             text-align: center;
         }
-        
-        /* IL TRUCCO: Se l'app viene eseguita dalla Home (standalone), nascondi tutto */
         @media all and (display-mode: standalone) {
-            .pwa-banner {
-                display: none !important;
-            }
+            .pwa-banner { display: none !important; }
         }
-        
-        /* Copertura extra per vecchie versioni di iOS */
         @media all and (display-mode: fullscreen) {
-            .pwa-banner {
-                display: none !important;
-            }
+            .pwa-banner { display: none !important; }
         }
     </style>
-
     <div class="pwa-banner">
         📲 <b>Salva l'app sul telefono!</b><br><br>
         Tocca l'icona di condivisione del browser ( 📤 ) e seleziona <b>"Aggiungi alla schermata Home"</b> per non perdere la tua scheda.
@@ -65,10 +55,8 @@ except Exception as e:
 id_foglio = st.query_params.get("id")
 
 if id_foglio:
-    # CASO A: Primo avvio da WhatsApp (l'URL è completo).
     controller.set("id_salvato", id_foglio, max_age=31536000)
 else:
-    # CASO B: L'app è stata aperta dalla schermata Home dell'iPhone (URL troncato).
     id_foglio = controller.get("id_salvato")
 
 if not id_foglio:
@@ -91,103 +79,13 @@ except Exception as e:
     st.stop()
 
 
-# --- 4. ESTRAZIONE DATI PROGRAMMA E STORICO ---
+# --- 4. SISTEMA ANTI-BLOCCO (CACHE) ---
+# QUESTA è la funzione mancante che evita a Google di bloccarti!
+@st.cache_data(ttl=300)
+def scarica_dati_fogli(_prog, _storico):
+    return _prog.get_all_values(), _storico.get_all_values()
 
-# A) Leggiamo il programma del Coach in modo dinamico
-dati_programma = sheet_programma.get_all_values()
-riga_header = -1
-idx_es, idx_giorno = -1, -1
-idx_serie_coach, idx_rip_coach = -1, -1
-
-for i, riga in enumerate(dati_programma):
-    if "Esercizio" in riga and "Giorno" in riga:
-        riga_header = i
-        idx_es = riga.index("Esercizio")
-        idx_giorno = riga.index("Giorno")
-        
-        # Cerca dinamicamente le colonne delle serie e ripetizioni (anche se chiamate diversamente)
-        for j, col in enumerate(riga):
-            col_str = str(col).lower()
-            if "serie target" in col_str: idx_serie_coach = j
-            elif "serie" in col_str and idx_serie_coach == -1: idx_serie_coach = j
-            
-            if "ripetizioni target" in col_str: idx_rip_coach = j
-            elif "rip" in col_str and idx_rip_coach == -1: idx_rip_coach = j
-        break
-
-if riga_header == -1:
-    st.error("Errore: Impossibile trovare le colonne 'Esercizio' e 'Giorno' nel programma.")
-    st.stop()
-
-esercizi_dict = {}
-giorni_disponibili = set()
-
-for riga in dati_programma[riga_header+1:]:
-    if len(riga) > max(idx_es, idx_giorno): 
-        nome = riga[idx_es].strip()
-        giorno = riga[idx_giorno].strip().upper()
-        
-        # Salviamo i target scritti dal coach
-        serie_coach = riga[idx_serie_coach].strip() if idx_serie_coach != -1 and len(riga) > idx_serie_coach else "N/D"
-        rip_coach = riga[idx_rip_coach].strip() if idx_rip_coach != -1 and len(riga) > idx_rip_coach else "N/D"
-        
-        if nome != "":
-            if giorno not in esercizi_dict:
-                esercizi_dict[giorno] = []
-            esercizi_dict[giorno].append({
-                "nome": nome, 
-                "serie_coach": serie_coach,
-                "rip_coach": rip_coach
-            })
-            if giorno != "":
-                giorni_disponibili.add(giorno)
-
-giorni_disponibili = sorted(list(giorni_disponibili))
-
-
-# B) Leggiamo lo storico dell'Atleta (Diario)
-dati_storico = sheet_storico.get_all_values()
-riga_header_storico = -1
-
-# Troviamo la riga delle intestazioni per evitare errori con righe vuote iniziali
-for i, riga in enumerate(dati_storico):
-    if "Esercizio" in riga and "Kg Sollevati" in riga:
-        riga_header_storico = i
-        break
-
-if riga_header_storico != -1 and len(dati_storico) > riga_header_storico + 1:
-    df_storico = pd.DataFrame(dati_storico[riga_header_storico+1:], columns=dati_storico[riga_header_storico])
-else:
-    df_storico = pd.DataFrame()
-
-# Funzione per comporre la scritta sul titolo della tendina
-def ottieni_testo_titolo(es_nome, serie_coach, rip_coach):
-    if not df_storico.empty and "Esercizio" in df_storico.columns:
-        df_es = df_storico[df_storico["Esercizio"] == es_nome]
-        if not df_es.empty:
-            # L'utente l'ha già fatto, peschiamo l'ultima riga!
-            if "Kg Sollevati" in df_es.columns and "Ripetizioni Fatte" in df_es.columns:
-                ultimi_kg = df_es["Kg Sollevati"].iloc[-1]
-                ultime_rip = df_es["Ripetizioni Fatte"].iloc[-1]
-                
-                # Pulizia visiva dei Kg (es. 60.0 diventa 60)
-                kg_str = str(ultimi_kg).strip().replace(",0", "").replace(".0", "")
-                
-                if kg_str != "" and kg_str != "nan":
-                    return f"Ultimo: {ultime_rip} rip @ {kg_str} kg"
-                elif str(ultime_rip).strip() != "" and str(ultime_rip).strip() != "nan":
-                    return f"Ultimo: {ultime_rip} rip"
-                    
-    # Se non l'ha mai fatto, usiamo i target del coach
-    s_val = str(serie_coach).strip()
-    r_val = str(rip_coach).strip()
-    
-    if s_val not in ["", "N/D", "nan"] and r_val not in ["", "N/D", "nan"]:
-        return f"Obiettivo: {s_val} x {r_val}"
-    elif r_val not in ["", "N/D", "nan"]:
-        return f"Obiettivo: {r_val} rip"
-    
-    return "Nuovo Esercizio"
+dati_programma, dati_storico = scarica_dati_fogli(sheet_programma, sheet_storico)
 
 
 # --- 5. ESTRAZIONE DATI PROGRAMMA E STORICO ---
@@ -201,7 +99,6 @@ for i, riga in enumerate(dati_programma):
         idx_es = riga.index("Esercizio")
         idx_giorno = riga.index("Giorno")
         
-        # Ricerca dinamica e intelligente delle colonne
         for j, col in enumerate(riga):
             col_str = str(col).lower().strip()
             if "serie" in col_str: idx_serie_coach = j
@@ -221,7 +118,6 @@ for riga in dati_programma[riga_header+1:]:
         nome = riga[idx_es].strip()
         giorno = riga[idx_giorno].strip().upper()
         
-        # Estraiamo i target indicati dal coach sulla prima scheda
         serie_coach = riga[idx_serie_coach].strip() if idx_serie_coach != -1 and len(riga) > idx_serie_coach else "?"
         rip_coach = riga[idx_rip_coach].strip() if idx_rip_coach != -1 and len(riga) > idx_rip_coach else "?"
         carico_coach = riga[idx_carico_coach].strip() if idx_carico_coach != -1 and len(riga) > idx_carico_coach else ""
@@ -240,7 +136,6 @@ for riga in dati_programma[riga_header+1:]:
 
 giorni_disponibili = sorted(list(giorni_disponibili))
 
-# Lettura dello storico (Diario)
 riga_header_storico = -1
 for i, riga in enumerate(dati_storico):
     if "Esercizio" in riga and "Kg Sollevati" in riga:
@@ -252,28 +147,20 @@ if riga_header_storico != -1 and len(dati_storico) > riga_header_storico + 1:
 else:
     df_storico = pd.DataFrame()
 
-# Funzione per comporre la stringa perfetta: "4 Serie x 10 rip | 60 kg"
 def ottieni_testo_titolo(es_nome, serie_coach, rip_coach, carico_coach):
     s_val = str(serie_coach).strip() if str(serie_coach).strip() not in ["", "N/D", "nan", "?"] else "?"
     r_val = str(rip_coach).strip() if str(rip_coach).strip() not in ["", "N/D", "nan", "?"] else "?"
-    
     base_str = f"{s_val} Serie x {r_val} rip"
     
-    # 1. Cerchiamo se l'atleta ha registrato dei carichi validi nello storico
     if not df_storico.empty and "Esercizio" in df_storico.columns:
         df_es = df_storico[df_storico["Esercizio"] == es_nome]
         if not df_es.empty and "Kg Sollevati" in df_es.columns:
-            
-            # Ignoriamo le serie salvate con "0 kg" per trovare l'ultimo VERO carico
             pesi_validi = df_es[~df_es["Kg Sollevati"].astype(str).str.strip().isin(["", "0", "0,0", "0.0", "nan"])]
-            
             if not pesi_validi.empty:
                 ultimi_kg = pesi_validi["Kg Sollevati"].iloc[-1]
-                # Pulizia (toglie virgole e .0 per fare numero pulito)
                 kg_str = str(ultimi_kg).strip().replace(",0", "").replace(".0", "")
                 return f"{base_str}  |  {kg_str} kg"
                 
-    # 2. Se non ha storico, usiamo il range indicato dal coach
     c_val = str(carico_coach).strip()
     if c_val not in ["", "N/D", "nan", "-1", "?"]:
         return f"{base_str}  |  {c_val} kg"
@@ -337,15 +224,14 @@ with tab_workout:
             giorno_scelto = st.selectbox("Quale scheda (Giorno) vuoi allenare oggi?", giorni_disponibili)
             esercizi_assegnati = esercizi_dict[giorno_scelto]
             
-            # --- INIZIALIZZAZIONE MEMORIA ---
+            # Memoria
             if "contatore_serie" not in st.session_state:
                 st.session_state.contatore_serie = {}
             if "ultimo_giorno_scelto" not in st.session_state:
                 st.session_state.ultimo_giorno_scelto = giorno_scelto
             if "es_aperto" not in st.session_state:
-                st.session_state.es_aperto = None # Memoria per non far chiudere la tendina
+                st.session_state.es_aperto = None
                 
-            # Se cambi scheda, resetta tutto
             if st.session_state.ultimo_giorno_scelto != giorno_scelto:
                 st.session_state.contatore_serie = {}
                 st.session_state.ultimo_giorno_scelto = giorno_scelto
@@ -353,8 +239,15 @@ with tab_workout:
 
             st.divider()
             
-            # 🚀 REINSERIAMO IL FORM PER BLOCCARE I REFRESH CONTINUI DEI KG E RIPETIZIONI
             with st.form("workout_form"):
+                
+                # --- FIX ERRORE INVIO DELLA TASTIERA ---
+                # Questo bottone intercetta il tasto Invio del telefono impedendo che le tendine si sballino
+                submit_nascosto = st.form_submit_button("🔄 Salva Dati (Premi Invio per confermare)", use_container_width=True)
+                if submit_nascosto:
+                    pass # Aggiorna la pagina innocuamente
+                
+                st.divider()
                 
                 for es_obj in esercizi_assegnati:
                     es = es_obj["nome"]
@@ -368,7 +261,7 @@ with tab_workout:
                     testo_titolo = ottieni_testo_titolo(es, serie_coach, rip_coach, carico_coach)
                     titolo_expander = f"🏋️‍♂️ {es}  |  {testo_titolo}"
                     
-                    # Se hai appena cliccato "Aggiungi Serie" su questo esercizio, forza la tendina a restare aperta!
+                    # Tiene aperta la tendina dell'ultimo esercizio su cui abbiamo premuto "+"
                     tieni_aperto = (st.session_state.es_aperto == es)
                     
                     with st.expander(titolo_expander, expanded=tieni_aperto):
@@ -381,10 +274,17 @@ with tab_workout:
                             with c2:
                                 st.number_input("Kg", min_value=0.0, step=0.5, key=f"kg_{es}_{i}")
                         
-                        # TRUCCO: Questo è un "Pulsante di Invio" secondario, ricarica la pagina solo quando lo premi!
-                        if st.form_submit_button("➕ Aggiungi Serie", key=f"btn_add_{es}"):
+                        # --- FIX NUOVE SERIE (COPIA DATI DALLA PRECEDENTE) ---
+                        if st.form_submit_button(f"➕ Aggiungi Serie", key=f"btn_add_{es}"):
+                            idx_nuovo = st.session_state.contatore_serie[es]
+                            idx_vecchio = idx_nuovo - 1
+                            
+                            # Clona i Kg e le Ripetizioni della serie appena completata e li prepara per la nuova
+                            st.session_state[f"rip_{es}_{idx_nuovo}"] = st.session_state.get(f"rip_{es}_{idx_vecchio}", 0)
+                            st.session_state[f"kg_{es}_{idx_nuovo}"] = st.session_state.get(f"kg_{es}_{idx_vecchio}", 0.0)
+                            
                             st.session_state.contatore_serie[es] += 1
-                            st.session_state.es_aperto = es # Ordina al sistema di tenere questa tendina aperta
+                            st.session_state.es_aperto = es # Mantiene aperto l'esercizio!
                             st.rerun() 
 
                 st.divider()
@@ -400,7 +300,7 @@ with tab_workout:
                 
                 st.divider()
                 
-                # IL PULSANTE DI SALVATAGGIO PRINCIPALE
+                # PULSANTE FINALE
                 submit_finale = st.form_submit_button("💾 Consegna Intero Allenamento", type="primary", use_container_width=True)
                 
                 if submit_finale:
@@ -413,7 +313,6 @@ with tab_workout:
                             rip = st.session_state.get(f"rip_{es}_{i}", 0)
                             kg = st.session_state.get(f"kg_{es}_{i}", 0.0)
                             
-                            # Salva solo se c'è almeno una ripetizione
                             if rip > 0:
                                 numero_serie = i + 1
                                 tonnellaggio = rip * kg
@@ -434,7 +333,7 @@ with tab_workout:
                         try:
                             sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
                             
-                            scarica_dati_fogli.clear() # Aggiorna la cache per mostrare i grafici corretti al volo
+                            scarica_dati_fogli.clear() # Questo sblocca i grafici per mostrare subito le novità
                             
                             st.session_state.dati_salvati = True
                             st.session_state.contatore_serie = {} 
