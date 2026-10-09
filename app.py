@@ -207,84 +207,103 @@ with tab_workout:
             giorno_scelto = st.selectbox("Quale scheda (Giorno) vuoi allenare oggi?", giorni_disponibili)
             esercizi_assegnati = esercizi_dict[giorno_scelto]
             
-            # 4. Form Unico per il salvataggio
-            with st.form("form_allenamento_completo"):
+            # --- INIZIALIZZAZIONE MEMORIA SERIE ---
+            # Serve a ricordare quante serie l'utente ha aggiunto per ogni esercizio
+            if "contatore_serie" not in st.session_state:
+                st.session_state.contatore_serie = {}
+            if "ultimo_giorno_scelto" not in st.session_state:
+                st.session_state.ultimo_giorno_scelto = giorno_scelto
                 
-                # --- RPE GLOBALE PER L'INTERA SESSIONE ---
-                rpe_globale = st.slider(
-                    "Fatica percepita (10=fatica massima 0=nessuna fatica)", 
-                    min_value=0.0, 
-                    max_value=10.0, 
-                    value=7.0, 
-                    step=0.5
-                )
-                st.divider()
-                
-                st.info("💡 **Istruzioni:** Compila le ripetizioni e i Kg per la prima serie. Usa il tasto **'+'** sotto ogni tabella per aggiungere tutte le serie che hai fatto!")
+            # Se l'utente cambia scheda (es. da A a B), resettiamo i contatori
+            if st.session_state.ultimo_giorno_scelto != giorno_scelto:
+                st.session_state.contatore_serie = {}
+                st.session_state.ultimo_giorno_scelto = giorno_scelto
 
-                tabelle_compilate = {}
-                feedbacks = {}
+            st.divider()
+            
+            # --- CREAZIONE DELLA SCHEDA A MENU A TENDINA ---
+            for es_obj in esercizi_assegnati:
+                es = es_obj["nome"]
+                carico_consigliato = es_obj["carico_coach"]
                 
-                for es_obj in esercizi_assegnati:
-                    es = es_obj["nome"]
-                    carico_consigliato = es_obj["carico_coach"]
+                # Di default prepariamo 1 serie per ogni esercizio
+                if es not in st.session_state.contatore_serie:
+                    st.session_state.contatore_serie[es] = 1
+                
+                # st.expander crea il menù a tendina cliccabile
+                with st.expander(f"🏋️‍♂️ {es}", expanded=False):
                     
-                    st.markdown(f"#### {es}")
-                    
-                    # Mostra l'ultimo peso o quello del coach
                     info_peso = ottieni_ultimo_peso(es, carico_consigliato)
                     st.caption(f"🎯 **Obiettivo/Storico:** {info_peso}")
                     
-                    # Tabella dinamica per aggiungere infinite serie
-                    df_init = pd.DataFrame([{"Ripetizioni": 0, "Kg": 0.0}])
-                    tabelle_compilate[es] = st.data_editor(
-                        df_init, 
-                        num_rows="dynamic", # Questo abilita il tasto "+"
-                        hide_index=True, 
-                        key=f"editor_{es}",
-                        use_container_width=True
-                    )
+                    # Genera dinamicamente i campi in base a quante serie ha aggiunto l'utente
+                    for i in range(st.session_state.contatore_serie[es]):
+                        st.markdown(f"**Serie {i + 1}**")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            # st.number_input ha nativamente i tasti + e - integrati
+                            st.number_input("Ripetizioni", min_value=0, step=1, key=f"rip_{es}_{i}")
+                        with c2:
+                            st.number_input("Kg", min_value=0.0, step=0.5, key=f"kg_{es}_{i}")
                     
-                    feedbacks[es] = st.text_input("Feedback / Dolori (Opzionale)", key=f"feed_{es}")
-                    st.divider()
-                    
-                submit_btn = st.form_submit_button("💾 Salva Intero Allenamento")
+                    # Bottone per aggiungere un'ulteriore serie a questo specifico esercizio
+                    if st.button("➕ Aggiungi Serie", key=f"btn_add_{es}"):
+                        st.session_state.contatore_serie[es] += 1
+                        st.rerun() # Ricarica per mostrare subito la nuova riga
+
+            st.divider()
+            
+            # --- FEEDBACK E RPE GLOBALI ALLA FINE DELLA SCHEDA ---
+            st.write("### Fine Allenamento")
+            rpe_globale = st.slider(
+                "Fatica percepita (10=fatica massima 0=nessuna fatica)", 
+                min_value=0.0, max_value=10.0, value=7.0, step=0.5
+            )
+            feedback_globale = st.text_area(
+                "Feedback / Dolori (Opzionale)", 
+                placeholder="Scrivi qui se hai provato fastidi, come ti sei sentito, ecc..."
+            )
+            
+            st.divider()
+            
+            # Pulsante di salvataggio
+            if st.button("💾 Consegna Intero Allenamento", type="primary", use_container_width=True):
+                righe_da_inserire = []
                 
-                # 5. Invio massivo a Google Fogli
-                if submit_btn:
-                    righe_da_inserire = []
+                for es_obj in esercizi_assegnati:
+                    es = es_obj["nome"]
                     
-                    for es_obj in esercizi_assegnati:
-                        es = es_obj["nome"]
-                        df_edit = tabelle_compilate[es]
+                    # Recuperiamo i dati dalla memoria di Streamlit (session_state)
+                    for i in range(st.session_state.contatore_serie[es]):
+                        rip = st.session_state.get(f"rip_{es}_{i}", 0)
+                        kg = st.session_state.get(f"kg_{es}_{i}", 0.0)
                         
-                        for index, row in df_edit.iterrows():
-                            rip = int(row.get("Ripetizioni", 0))
-                            kg = float(row.get("Kg", 0.0))
+                        # Salviamo la serie solo se c'è almeno 1 ripetizione
+                        if rip > 0:
+                            numero_serie = i + 1
+                            tonnellaggio = rip * kg
                             
-                            # Salva solo le serie dove l'atleta ha inserito almeno 1 ripetizione
-                            if rip > 0:
-                                numero_serie = index + 1
-                                tonnellaggio = rip * kg
-                                
-                                nuova_riga = [
-                                    str(data_sessione),             
-                                    es,                             
-                                    numero_serie,        
-                                    rip,          
-                                    str(kg).replace(".", ","),           
-                                    str(tonnellaggio).replace(".", ","),
-                                    str(rpe_globale).replace(".", ","),          
-                                    feedbacks[es]          
-                                ]
-                                righe_da_inserire.append(nuova_riga)
-                    
-                    if len(righe_da_inserire) > 0:
-                        try:
-                            sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
-                            st.session_state.dati_salvati = True
-                            st.rerun() 
-                        except Exception as e:
-                            st.error(f"Errore durante il salvataggio: {e}")
-                    else:
-                        st.warning("⚠️ Non hai compilato nessuna serie valida (Ripetizioni > 0). Nessun dato salvato.")
+                            nuova_riga = [
+                                str(data_sessione),             
+                                es,                             
+                                numero_serie,        
+                                rip,          
+                                str(kg).replace(".", ","),           
+                                str(tonnellaggio).replace(".", ","),
+                                str(rpe_globale).replace(".", ","),          
+                                feedback_globale          
+                            ]
+                            righe_da_inserire.append(nuova_riga)
+                
+                if len(righe_da_inserire) > 0:
+                    try:
+                        sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
+                        
+                        # Segniamo il successo e ripuliamo la memoria per il prossimo allenamento
+                        st.session_state.dati_salvati = True
+                        st.session_state.contatore_serie = {} 
+                        st.rerun() 
+                    except Exception as e:
+                        st.error(f"Errore durante il salvataggio: {e}")
+                else:
+                    st.warning("⚠️ Non hai compilato nessuna serie valida (Ripetizioni > 0). Nessun dato salvato.")
