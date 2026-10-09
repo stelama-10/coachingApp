@@ -80,7 +80,6 @@ except Exception as e:
 
 
 # --- 4. SISTEMA ANTI-BLOCCO (CACHE) ---
-# QUESTA è la funzione mancante che evita a Google di bloccarti!
 @st.cache_data(ttl=300)
 def scarica_dati_fogli(_prog, _storico):
     return _prog.get_all_values(), _storico.get_all_values()
@@ -91,7 +90,7 @@ dati_programma, dati_storico = scarica_dati_fogli(sheet_programma, sheet_storico
 # --- 5. ESTRAZIONE DATI PROGRAMMA E STORICO ---
 riga_header = -1
 idx_es, idx_giorno = -1, -1
-idx_serie_coach, idx_rip_coach, idx_carico_coach = -1, -1, -1
+idx_serie_coach, idx_rip_coach, idx_carico_coach, idx_recupero = -1, -1, -1, -1
 
 for i, riga in enumerate(dati_programma):
     if "Esercizio" in riga and "Giorno" in riga:
@@ -104,6 +103,7 @@ for i, riga in enumerate(dati_programma):
             if "serie" in col_str: idx_serie_coach = j
             elif "rip" in col_str: idx_rip_coach = j
             elif "kg" in col_str or "carico" in col_str or "peso" in col_str: idx_carico_coach = j
+            elif "recupero" in col_str: idx_recupero = j
         break
 
 if riga_header == -1:
@@ -121,6 +121,7 @@ for riga in dati_programma[riga_header+1:]:
         serie_coach = riga[idx_serie_coach].strip() if idx_serie_coach != -1 and len(riga) > idx_serie_coach else "?"
         rip_coach = riga[idx_rip_coach].strip() if idx_rip_coach != -1 and len(riga) > idx_rip_coach else "?"
         carico_coach = riga[idx_carico_coach].strip() if idx_carico_coach != -1 and len(riga) > idx_carico_coach else ""
+        recupero_coach = riga[idx_recupero].strip() if idx_recupero != -1 and len(riga) > idx_recupero else ""
         
         if nome != "":
             if giorno not in esercizi_dict:
@@ -129,7 +130,8 @@ for riga in dati_programma[riga_header+1:]:
                 "nome": nome, 
                 "serie_coach": serie_coach,
                 "rip_coach": rip_coach,
-                "carico_coach": carico_coach
+                "carico_coach": carico_coach,
+                "recupero_coach": recupero_coach
             })
             if giorno != "":
                 giorni_disponibili.add(giorno)
@@ -147,11 +149,26 @@ if riga_header_storico != -1 and len(dati_storico) > riga_header_storico + 1:
 else:
     df_storico = pd.DataFrame()
 
-def ottieni_testo_titolo(es_nome, serie_coach, rip_coach, carico_coach):
+# Grafica pulita per il titolo della tendina (Senza emoji e barre verticali)
+def ottieni_testo_titolo(es_nome, serie_coach, rip_coach, carico_coach, recupero_coach):
     s_val = str(serie_coach).strip() if str(serie_coach).strip() not in ["", "N/D", "nan", "?"] else "?"
     r_val = str(rip_coach).strip() if str(rip_coach).strip() not in ["", "N/D", "nan", "?"] else "?"
-    base_str = f"{s_val} Serie x {r_val} rip"
+    rec_val = str(recupero_coach).strip()
     
+    # Formato compatto "4x10"
+    if s_val != "?" and r_val != "?":
+        base_str = f"{s_val}x{r_val}"
+    elif s_val != "?":
+        base_str = f"{s_val} Set"
+    elif r_val != "?":
+        base_str = f"{r_val} rip"
+    else:
+        base_str = "Set liberi"
+        
+    str_recupero = f"  •  {rec_val}" if rec_val not in ["", "N/D", "nan", "?"] else ""
+    
+    # Cerchiamo il carico
+    kg_finale = ""
     if not df_storico.empty and "Esercizio" in df_storico.columns:
         df_es = df_storico[df_storico["Esercizio"] == es_nome]
         if not df_es.empty and "Kg Sollevati" in df_es.columns:
@@ -159,13 +176,16 @@ def ottieni_testo_titolo(es_nome, serie_coach, rip_coach, carico_coach):
             if not pesi_validi.empty:
                 ultimi_kg = pesi_validi["Kg Sollevati"].iloc[-1]
                 kg_str = str(ultimi_kg).strip().replace(",0", "").replace(".0", "")
-                return f"{base_str}  |  {kg_str} kg"
+                kg_finale = f"  •  {kg_str} kg"
                 
-    c_val = str(carico_coach).strip()
-    if c_val not in ["", "N/D", "nan", "-1", "?"]:
-        return f"{base_str}  |  {c_val} kg"
-        
-    return f"{base_str}  |  Kg liberi"
+    if kg_finale == "":
+        c_val = str(carico_coach).strip()
+        if c_val not in ["", "N/D", "nan", "-1", "?"]:
+            kg_finale = f"  •  {c_val} kg"
+        else:
+            kg_finale = f"  •  Kg liberi"
+            
+    return f"{base_str}{kg_finale}{str_recupero}"
 
 
 # --- 6. INTERFACCIA A SCHEDE (TABS) ---
@@ -241,25 +261,20 @@ with tab_workout:
             
             with st.form("workout_form"):
                 
-                # --- FIX ERRORE INVIO DELLA TASTIERA ---
-                # Questo bottone intercetta il tasto Invio del telefono impedendo che le tendine si sballino
-                submit_nascosto = st.form_submit_button("🔄 Salva Dati (Premi Invio per confermare)", use_container_width=True)
-                if submit_nascosto:
-                    pass # Aggiorna la pagina innocuamente
-                
-                st.divider()
-                
                 for es_obj in esercizi_assegnati:
                     es = es_obj["nome"]
                     serie_coach = es_obj["serie_coach"]
                     rip_coach = es_obj["rip_coach"]
                     carico_coach = es_obj["carico_coach"]
+                    recupero_coach = es_obj["recupero_coach"]
                     
                     if es not in st.session_state.contatore_serie:
                         st.session_state.contatore_serie[es] = 1
                     
-                    testo_titolo = ottieni_testo_titolo(es, serie_coach, rip_coach, carico_coach)
-                    titolo_expander = f"🏋️‍♂️ {es}  |  {testo_titolo}"
+                    testo_titolo = ottieni_testo_titolo(es, serie_coach, rip_coach, carico_coach, recupero_coach)
+                    
+                    # Titolo pulitissimo senza emoji e senza pipe!
+                    titolo_expander = f"{es}  —  {testo_titolo}"
                     
                     # Tiene aperta la tendina dell'ultimo esercizio su cui abbiamo premuto "+"
                     tieni_aperto = (st.session_state.es_aperto == es)
@@ -274,17 +289,15 @@ with tab_workout:
                             with c2:
                                 st.number_input("Kg", min_value=0.0, step=0.5, key=f"kg_{es}_{i}")
                         
-                        # --- FIX NUOVE SERIE (COPIA DATI DALLA PRECEDENTE) ---
                         if st.form_submit_button(f"➕ Aggiungi Serie", key=f"btn_add_{es}"):
                             idx_nuovo = st.session_state.contatore_serie[es]
                             idx_vecchio = idx_nuovo - 1
                             
-                            # Clona i Kg e le Ripetizioni della serie appena completata e li prepara per la nuova
                             st.session_state[f"rip_{es}_{idx_nuovo}"] = st.session_state.get(f"rip_{es}_{idx_vecchio}", 0)
                             st.session_state[f"kg_{es}_{idx_nuovo}"] = st.session_state.get(f"kg_{es}_{idx_vecchio}", 0.0)
                             
                             st.session_state.contatore_serie[es] += 1
-                            st.session_state.es_aperto = es # Mantiene aperto l'esercizio!
+                            st.session_state.es_aperto = es
                             st.rerun() 
 
                 st.divider()
@@ -300,7 +313,7 @@ with tab_workout:
                 
                 st.divider()
                 
-                # PULSANTE FINALE
+                # PULSANTE FINALE DI SALVATAGGIO (Unico per tutto il form)
                 submit_finale = st.form_submit_button("💾 Consegna Intero Allenamento", type="primary", use_container_width=True)
                 
                 if submit_finale:
@@ -333,7 +346,7 @@ with tab_workout:
                         try:
                             sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
                             
-                            scarica_dati_fogli.clear() # Questo sblocca i grafici per mostrare subito le novità
+                            scarica_dati_fogli.clear() # Sblocca i grafici per aggiornarli
                             
                             st.session_state.dati_salvati = True
                             st.session_state.contatore_serie = {} 
