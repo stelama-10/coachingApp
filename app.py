@@ -93,19 +93,26 @@ except Exception as e:
 
 # --- 4. ESTRAZIONE DATI PROGRAMMA E STORICO ---
 
-# A) Leggiamo il programma del Coach
+# A) Leggiamo il programma del Coach in modo dinamico
 dati_programma = sheet_programma.get_all_values()
 riga_header = -1
-idx_es, idx_giorno, idx_carico = -1, -1, -1
+idx_es, idx_giorno = -1, -1
+idx_serie_coach, idx_rip_coach = -1, -1
 
 for i, riga in enumerate(dati_programma):
     if "Esercizio" in riga and "Giorno" in riga:
         riga_header = i
         idx_es = riga.index("Esercizio")
         idx_giorno = riga.index("Giorno")
-        # Cerca la colonna del peso consigliato se esiste
-        if "Kg" in riga: idx_carico = riga.index("Kg")
-        elif "Carico" in riga: idx_carico = riga.index("Carico")
+        
+        # Cerca dinamicamente le colonne delle serie e ripetizioni (anche se chiamate diversamente)
+        for j, col in enumerate(riga):
+            col_str = str(col).lower()
+            if "serie target" in col_str: idx_serie_coach = j
+            elif "serie" in col_str and idx_serie_coach == -1: idx_serie_coach = j
+            
+            if "ripetizioni target" in col_str: idx_rip_coach = j
+            elif "rip" in col_str and idx_rip_coach == -1: idx_rip_coach = j
         break
 
 if riga_header == -1:
@@ -119,37 +126,68 @@ for riga in dati_programma[riga_header+1:]:
     if len(riga) > max(idx_es, idx_giorno): 
         nome = riga[idx_es].strip()
         giorno = riga[idx_giorno].strip().upper()
-        carico_coach = riga[idx_carico].strip() if idx_carico != -1 and len(riga) > idx_carico else "N/D"
+        
+        # Salviamo i target scritti dal coach
+        serie_coach = riga[idx_serie_coach].strip() if idx_serie_coach != -1 and len(riga) > idx_serie_coach else "N/D"
+        rip_coach = riga[idx_rip_coach].strip() if idx_rip_coach != -1 and len(riga) > idx_rip_coach else "N/D"
         
         if nome != "":
             if giorno not in esercizi_dict:
                 esercizi_dict[giorno] = []
-            esercizi_dict[giorno].append({"nome": nome, "carico_coach": carico_coach})
+            esercizi_dict[giorno].append({
+                "nome": nome, 
+                "serie_coach": serie_coach,
+                "rip_coach": rip_coach
+            })
             if giorno != "":
                 giorni_disponibili.add(giorno)
 
 giorni_disponibili = sorted(list(giorni_disponibili))
 
-# B) Leggiamo lo storico dell'Atleta (Diario) per grafici e carichi precedenti
+
+# B) Leggiamo lo storico dell'Atleta (Diario)
 dati_storico = sheet_storico.get_all_values()
-if len(dati_storico) > 1:
-    df_storico = pd.DataFrame(dati_storico[1:], columns=dati_storico[0])
+riga_header_storico = -1
+
+# Troviamo la riga delle intestazioni per evitare errori con righe vuote iniziali
+for i, riga in enumerate(dati_storico):
+    if "Esercizio" in riga and "Kg Sollevati" in riga:
+        riga_header_storico = i
+        break
+
+if riga_header_storico != -1 and len(dati_storico) > riga_header_storico + 1:
+    df_storico = pd.DataFrame(dati_storico[riga_header_storico+1:], columns=dati_storico[riga_header_storico])
 else:
     df_storico = pd.DataFrame()
 
-# Funzione per trovare l'ultimo peso usato o quello indicato dal coach
-def ottieni_ultimo_peso(es_nome, carico_coach):
-    if not df_storico.empty and "Esercizio" in df_storico.columns and "Kg" in df_storico.columns:
+# Funzione per comporre la scritta sul titolo della tendina
+def ottieni_testo_titolo(es_nome, serie_coach, rip_coach):
+    if not df_storico.empty and "Esercizio" in df_storico.columns:
         df_es = df_storico[df_storico["Esercizio"] == es_nome]
         if not df_es.empty:
-            ultimi_kg = df_es["Kg"].iloc[-1]
-            if str(ultimi_kg).strip() != "":
-                return f"{ultimi_kg} kg (Ultimo allenamento)"
+            # L'utente l'ha già fatto, peschiamo l'ultima riga!
+            if "Kg Sollevati" in df_es.columns and "Ripetizioni Fatte" in df_es.columns:
+                ultimi_kg = df_es["Kg Sollevati"].iloc[-1]
+                ultime_rip = df_es["Ripetizioni Fatte"].iloc[-1]
+                
+                # Pulizia visiva dei Kg (es. 60.0 diventa 60)
+                kg_str = str(ultimi_kg).strip().replace(",0", "").replace(".0", "")
+                
+                if kg_str != "" and kg_str != "nan":
+                    return f"Ultimo: {ultime_rip} rip @ {kg_str} kg"
+                elif str(ultime_rip).strip() != "" and str(ultime_rip).strip() != "nan":
+                    return f"Ultimo: {ultime_rip} rip"
+                    
+    # Se non l'ha mai fatto, usiamo i target del coach
+    s_val = str(serie_coach).strip()
+    r_val = str(rip_coach).strip()
     
-    if carico_coach != "N/D" and carico_coach != "":
-        return f"{carico_coach} (Indicato dal Coach)"
-        
-    return "Nessun dato precedente"
+    if s_val not in ["", "N/D", "nan"] and r_val not in ["", "N/D", "nan"]:
+        return f"Obiettivo: {s_val} x {r_val}"
+    elif r_val not in ["", "N/D", "nan"]:
+        return f"Obiettivo: {r_val} rip"
+    
+    return "Nuovo Esercizio"
 
 
 # --- 5. INTERFACCIA A SCHEDE (TABS) ---
@@ -166,14 +204,15 @@ with tab_dash:
     else:
         df_stat = df_storico.copy()
         
-        # Pulizia dati per i calcoli
-        if "Tonnellaggio" in df_stat.columns:
-            df_stat["Tonnellaggio"] = pd.to_numeric(df_stat["Tonnellaggio"].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
+        if "Tonnellaggio" in df_stat.columns or "Tonnellaggi" in df_stat.columns:
+            col_tonn = "Tonnellaggio" if "Tonnellaggio" in df_stat.columns else "Tonnellaggi"
+            df_stat[col_tonn] = pd.to_numeric(df_stat[col_tonn].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
         else:
-            df_stat["Tonnellaggio"] = 0
+            df_stat["Tonnellaggi"] = 0
+            col_tonn = "Tonnellaggi"
 
         tot_allenamenti = df_stat["Data"].nunique() if "Data" in df_stat.columns else 0
-        tot_volume = df_stat["Tonnellaggio"].sum()
+        tot_volume = df_stat[col_tonn].sum()
         
         c1, c2 = st.columns(2)
         c1.metric("Allenamenti Fatti", tot_allenamenti)
@@ -182,7 +221,7 @@ with tab_dash:
         st.divider()
         st.subheader("Volume sollevato nel tempo 📈")
         if "Data" in df_stat.columns:
-            vol_time = df_stat.groupby("Data")["Tonnellaggio"].sum().reset_index()
+            vol_time = df_stat.groupby("Data")[col_tonn].sum().reset_index()
             vol_time = vol_time.set_index("Data")
             st.line_chart(vol_time)
 
@@ -208,13 +247,11 @@ with tab_workout:
             esercizi_assegnati = esercizi_dict[giorno_scelto]
             
             # --- INIZIALIZZAZIONE MEMORIA SERIE ---
-            # Serve a ricordare quante serie l'utente ha aggiunto per ogni esercizio
             if "contatore_serie" not in st.session_state:
                 st.session_state.contatore_serie = {}
             if "ultimo_giorno_scelto" not in st.session_state:
                 st.session_state.ultimo_giorno_scelto = giorno_scelto
                 
-            # Se l'utente cambia scheda (es. da A a B), resettiamo i contatori
             if st.session_state.ultimo_giorno_scelto != giorno_scelto:
                 st.session_state.contatore_serie = {}
                 st.session_state.ultimo_giorno_scelto = giorno_scelto
@@ -224,39 +261,40 @@ with tab_workout:
             # --- CREAZIONE DELLA SCHEDA A MENU A TENDINA ---
             for es_obj in esercizi_assegnati:
                 es = es_obj["nome"]
-                carico_consigliato = es_obj["carico_coach"]
+                serie_coach = es_obj["serie_coach"]
+                rip_coach = es_obj["rip_coach"]
                 
-                # Di default prepariamo 1 serie per ogni esercizio
+                # Di default prepariamo 1 serie iniziale per ogni esercizio
                 if es not in st.session_state.contatore_serie:
                     st.session_state.contatore_serie[es] = 1
                 
-                # st.expander crea il menù a tendina cliccabile
-                with st.expander(f"🏋️‍♂️ {es}", expanded=False):
+                # Costruisce il titolo visibile a tendina chiusa
+                testo_titolo = ottieni_testo_titolo(es, serie_coach, rip_coach)
+                titolo_expander = f"🏋️‍♂️ {es}  |  {testo_titolo}"
+                
+                with st.expander(titolo_expander, expanded=False):
                     
-                    info_peso = ottieni_ultimo_peso(es, carico_consigliato)
-                    st.caption(f"🎯 **Obiettivo/Storico:** {info_peso}")
-                    
-                    # Genera dinamicamente i campi in base a quante serie ha aggiunto l'utente
                     for i in range(st.session_state.contatore_serie[es]):
                         st.markdown(f"**Serie {i + 1}**")
                         c1, c2 = st.columns(2)
                         with c1:
-                            # st.number_input ha nativamente i tasti + e - integrati
+                            # Tasti +/- nativi per le ripetizioni
                             st.number_input("Ripetizioni", min_value=0, step=1, key=f"rip_{es}_{i}")
                         with c2:
+                            # Tasti +/- nativi per i Kg
                             st.number_input("Kg", min_value=0.0, step=0.5, key=f"kg_{es}_{i}")
                     
-                    # Bottone per aggiungere un'ulteriore serie a questo specifico esercizio
+                    # Tasto per aggiungere dinamicamente una riga in più a quell'esercizio
                     if st.button("➕ Aggiungi Serie", key=f"btn_add_{es}"):
                         st.session_state.contatore_serie[es] += 1
-                        st.rerun() # Ricarica per mostrare subito la nuova riga
+                        st.rerun() 
 
             st.divider()
             
             # --- FEEDBACK E RPE GLOBALI ALLA FINE DELLA SCHEDA ---
             st.write("### Fine Allenamento")
             rpe_globale = st.slider(
-                "Fatica percepita (10=fatica massima 0=nessuna fatica)", 
+                "Fatica percepita (10=fatica massima, 0=nessuna fatica)", 
                 min_value=0.0, max_value=10.0, value=7.0, step=0.5
             )
             feedback_globale = st.text_area(
@@ -273,12 +311,10 @@ with tab_workout:
                 for es_obj in esercizi_assegnati:
                     es = es_obj["nome"]
                     
-                    # Recuperiamo i dati dalla memoria di Streamlit (session_state)
                     for i in range(st.session_state.contatore_serie[es]):
                         rip = st.session_state.get(f"rip_{es}_{i}", 0)
                         kg = st.session_state.get(f"kg_{es}_{i}", 0.0)
                         
-                        # Salviamo la serie solo se c'è almeno 1 ripetizione
                         if rip > 0:
                             numero_serie = i + 1
                             tonnellaggio = rip * kg
@@ -298,8 +334,6 @@ with tab_workout:
                 if len(righe_da_inserire) > 0:
                     try:
                         sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
-                        
-                        # Segniamo il successo e ripuliamo la memoria per il prossimo allenamento
                         st.session_state.dati_salvati = True
                         st.session_state.contatore_serie = {} 
                         st.rerun() 
