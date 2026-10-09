@@ -190,7 +190,98 @@ def ottieni_testo_titolo(es_nome, serie_coach, rip_coach):
     return "Nuovo Esercizio"
 
 
-# --- 5. INTERFACCIA A SCHEDE (TABS) ---
+# --- 5. ESTRAZIONE DATI PROGRAMMA E STORICO ---
+riga_header = -1
+idx_es, idx_giorno = -1, -1
+idx_serie_coach, idx_rip_coach, idx_carico_coach = -1, -1, -1
+
+for i, riga in enumerate(dati_programma):
+    if "Esercizio" in riga and "Giorno" in riga:
+        riga_header = i
+        idx_es = riga.index("Esercizio")
+        idx_giorno = riga.index("Giorno")
+        
+        # Ricerca dinamica e intelligente delle colonne
+        for j, col in enumerate(riga):
+            col_str = str(col).lower().strip()
+            if "serie" in col_str: idx_serie_coach = j
+            elif "rip" in col_str: idx_rip_coach = j
+            elif "kg" in col_str or "carico" in col_str or "peso" in col_str: idx_carico_coach = j
+        break
+
+if riga_header == -1:
+    st.error("Errore: Impossibile trovare le colonne 'Esercizio' e 'Giorno' nel programma.")
+    st.stop()
+
+esercizi_dict = {}
+giorni_disponibili = set()
+
+for riga in dati_programma[riga_header+1:]:
+    if len(riga) > max(idx_es, idx_giorno): 
+        nome = riga[idx_es].strip()
+        giorno = riga[idx_giorno].strip().upper()
+        
+        # Estraiamo i target indicati dal coach sulla prima scheda
+        serie_coach = riga[idx_serie_coach].strip() if idx_serie_coach != -1 and len(riga) > idx_serie_coach else "?"
+        rip_coach = riga[idx_rip_coach].strip() if idx_rip_coach != -1 and len(riga) > idx_rip_coach else "?"
+        carico_coach = riga[idx_carico_coach].strip() if idx_carico_coach != -1 and len(riga) > idx_carico_coach else ""
+        
+        if nome != "":
+            if giorno not in esercizi_dict:
+                esercizi_dict[giorno] = []
+            esercizi_dict[giorno].append({
+                "nome": nome, 
+                "serie_coach": serie_coach,
+                "rip_coach": rip_coach,
+                "carico_coach": carico_coach
+            })
+            if giorno != "":
+                giorni_disponibili.add(giorno)
+
+giorni_disponibili = sorted(list(giorni_disponibili))
+
+# Lettura dello storico (Diario)
+riga_header_storico = -1
+for i, riga in enumerate(dati_storico):
+    if "Esercizio" in riga and "Kg Sollevati" in riga:
+        riga_header_storico = i
+        break
+
+if riga_header_storico != -1 and len(dati_storico) > riga_header_storico + 1:
+    df_storico = pd.DataFrame(dati_storico[riga_header_storico+1:], columns=dati_storico[riga_header_storico])
+else:
+    df_storico = pd.DataFrame()
+
+# Funzione per comporre la stringa perfetta: "4 Serie x 10 rip | 60 kg"
+def ottieni_testo_titolo(es_nome, serie_coach, rip_coach, carico_coach):
+    s_val = str(serie_coach).strip() if str(serie_coach).strip() not in ["", "N/D", "nan", "?"] else "?"
+    r_val = str(rip_coach).strip() if str(rip_coach).strip() not in ["", "N/D", "nan", "?"] else "?"
+    
+    base_str = f"{s_val} Serie x {r_val} rip"
+    
+    # 1. Cerchiamo se l'atleta ha registrato dei carichi validi nello storico
+    if not df_storico.empty and "Esercizio" in df_storico.columns:
+        df_es = df_storico[df_storico["Esercizio"] == es_nome]
+        if not df_es.empty and "Kg Sollevati" in df_es.columns:
+            
+            # Ignoriamo le serie salvate con "0 kg" per trovare l'ultimo VERO carico
+            pesi_validi = df_es[~df_es["Kg Sollevati"].astype(str).str.strip().isin(["", "0", "0,0", "0.0", "nan"])]
+            
+            if not pesi_validi.empty:
+                ultimi_kg = pesi_validi["Kg Sollevati"].iloc[-1]
+                # Pulizia (toglie virgole e .0 per fare numero pulito)
+                kg_str = str(ultimi_kg).strip().replace(",0", "").replace(".0", "")
+                return f"{base_str}  |  {kg_str} kg"
+                
+    # 2. Se non ha storico, usiamo il range indicato dal coach
+    c_val = str(carico_coach).strip()
+    if c_val not in ["", "N/D", "nan", "-1", "?"]:
+        return f"{base_str}  |  {c_val} kg"
+        
+    return f"{base_str}  |  Kg liberi"
+
+
+# --- 6. INTERFACCIA A SCHEDE (TABS) ---
 tab_dash, tab_workout = st.tabs(["📊 Dashboard", "🏋️‍♂️ Scheda Allenamento"])
 
 # ==========================================
@@ -206,7 +297,7 @@ with tab_dash:
         
         if "Tonnellaggio" in df_stat.columns or "Tonnellaggi" in df_stat.columns:
             col_tonn = "Tonnellaggio" if "Tonnellaggio" in df_stat.columns else "Tonnellaggi"
-            df_stat[col_tonn] = pd.to_numeric(df_stat[col_tonn].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
+            df_stat[col_tonn] = pd.to_numeric(df_stat[col_tonn].astype(str).replace(",", ".", regex=True), errors='coerce').fillna(0)
         else:
             df_stat["Tonnellaggi"] = 0
             col_tonn = "Tonnellaggi"
@@ -246,7 +337,6 @@ with tab_workout:
             giorno_scelto = st.selectbox("Quale scheda (Giorno) vuoi allenare oggi?", giorni_disponibili)
             esercizi_assegnati = esercizi_dict[giorno_scelto]
             
-            # --- INIZIALIZZAZIONE MEMORIA SERIE ---
             if "contatore_serie" not in st.session_state:
                 st.session_state.contatore_serie = {}
             if "ultimo_giorno_scelto" not in st.session_state:
@@ -258,18 +348,16 @@ with tab_workout:
 
             st.divider()
             
-            # --- CREAZIONE DELLA SCHEDA A MENU A TENDINA ---
             for es_obj in esercizi_assegnati:
                 es = es_obj["nome"]
                 serie_coach = es_obj["serie_coach"]
                 rip_coach = es_obj["rip_coach"]
+                carico_coach = es_obj["carico_coach"]
                 
-                # Di default prepariamo 1 serie iniziale per ogni esercizio
                 if es not in st.session_state.contatore_serie:
                     st.session_state.contatore_serie[es] = 1
                 
-                # Costruisce il titolo visibile a tendina chiusa
-                testo_titolo = ottieni_testo_titolo(es, serie_coach, rip_coach)
+                testo_titolo = ottieni_testo_titolo(es, serie_coach, rip_coach, carico_coach)
                 titolo_expander = f"🏋️‍♂️ {es}  |  {testo_titolo}"
                 
                 with st.expander(titolo_expander, expanded=False):
@@ -278,20 +366,15 @@ with tab_workout:
                         st.markdown(f"**Serie {i + 1}**")
                         c1, c2 = st.columns(2)
                         with c1:
-                            # Tasti +/- nativi per le ripetizioni
                             st.number_input("Ripetizioni", min_value=0, step=1, key=f"rip_{es}_{i}")
                         with c2:
-                            # Tasti +/- nativi per i Kg
                             st.number_input("Kg", min_value=0.0, step=0.5, key=f"kg_{es}_{i}")
                     
-                    # Tasto per aggiungere dinamicamente una riga in più a quell'esercizio
                     if st.button("➕ Aggiungi Serie", key=f"btn_add_{es}"):
                         st.session_state.contatore_serie[es] += 1
                         st.rerun() 
 
             st.divider()
-            
-            # --- FEEDBACK E RPE GLOBALI ALLA FINE DELLA SCHEDA ---
             st.write("### Fine Allenamento")
             rpe_globale = st.slider(
                 "Fatica percepita (10=fatica massima, 0=nessuna fatica)", 
@@ -304,7 +387,6 @@ with tab_workout:
             
             st.divider()
             
-            # Pulsante di salvataggio
             if st.button("💾 Consegna Intero Allenamento", type="primary", use_container_width=True):
                 righe_da_inserire = []
                 
@@ -334,6 +416,11 @@ with tab_workout:
                 if len(righe_da_inserire) > 0:
                     try:
                         sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
+                        
+                        # --- TRUCCO FONDAMENTALE ---
+                        # Svuota la cache in automatico in modo che il grafico si ricarichi coi nuovi dati
+                        scarica_dati_fogli.clear()
+                        
                         st.session_state.dati_salvati = True
                         st.session_state.contatore_serie = {} 
                         st.rerun() 
