@@ -2,6 +2,7 @@ import streamlit as st
 import datetime
 import gspread
 import pandas as pd
+import requests  # <-- NUOVA LIBRERIA PER LE API DELLE IMMAGINI
 from google.oauth2.service_account import Credentials
 from streamlit_cookies_controller import CookieController
 
@@ -79,12 +80,32 @@ except Exception as e:
     st.stop()
 
 
-# --- 4. SISTEMA ANTI-BLOCCO (CACHE) ---
+# --- 4. SISTEMA ANTI-BLOCCO (CACHE) E RICERCA IMMAGINI ---
 @st.cache_data(ttl=300)
 def scarica_dati_fogli(_prog, _storico):
     return _prog.get_all_values(), _storico.get_all_values()
 
 dati_programma, dati_storico = scarica_dati_fogli(sheet_programma, sheet_storico)
+
+# Salva la ricerca dell'immagine in memoria per 24 ore
+@st.cache_data(ttl=86400) 
+def cerca_immagine_esercizio(nome_esercizio):
+    try:
+        url_search = f"https://wger.de/api/v2/exercise/search/?term={nome_esercizio}"
+        res = requests.get(url_search, timeout=2)
+        if res.status_code == 200:
+            dati = res.json()
+            if dati.get("suggestions"):
+                ex_id = dati["suggestions"][0]["data"]["id"]
+                url_img = f"https://wger.de/api/v2/exerciseinfo/{ex_id}/"
+                res_img = requests.get(url_img, timeout=2)
+                if res_img.status_code == 200:
+                    dati_img = res_img.json()
+                    if dati_img.get("images"):
+                        return dati_img["images"][0]["image"]
+    except:
+        pass
+    return None
 
 
 # --- 5. ESTRAZIONE DATI PROGRAMMA E STORICO ---
@@ -149,13 +170,11 @@ if riga_header_storico != -1 and len(dati_storico) > riga_header_storico + 1:
 else:
     df_storico = pd.DataFrame()
 
-# Grafica pulita per il titolo della tendina (Senza emoji e barre verticali)
 def ottieni_testo_titolo(es_nome, serie_coach, rip_coach, carico_coach, recupero_coach):
     s_val = str(serie_coach).strip() if str(serie_coach).strip() not in ["", "N/D", "nan", "?"] else "?"
     r_val = str(rip_coach).strip() if str(rip_coach).strip() not in ["", "N/D", "nan", "?"] else "?"
     rec_val = str(recupero_coach).strip()
     
-    # Formato compatto "4x10"
     if s_val != "?" and r_val != "?":
         base_str = f"{s_val}x{r_val}"
     elif s_val != "?":
@@ -167,7 +186,6 @@ def ottieni_testo_titolo(es_nome, serie_coach, rip_coach, carico_coach, recupero
         
     str_recupero = f"  •  {rec_val}" if rec_val not in ["", "N/D", "nan", "?"] else ""
     
-    # Cerchiamo il carico
     kg_finale = ""
     if not df_storico.empty and "Esercizio" in df_storico.columns:
         df_es = df_storico[df_storico["Esercizio"] == es_nome]
@@ -272,15 +290,28 @@ with tab_workout:
                         st.session_state.contatore_serie[es] = 1
                     
                     testo_titolo = ottieni_testo_titolo(es, serie_coach, rip_coach, carico_coach, recupero_coach)
-                    
-                    # Titolo pulitissimo senza emoji e senza pipe!
                     titolo_expander = f"{es}  —  {testo_titolo}"
                     
-                    # Tiene aperta la tendina dell'ultimo esercizio su cui abbiamo premuto "+"
                     tieni_aperto = (st.session_state.es_aperto == es)
                     
                     with st.expander(titolo_expander, expanded=tieni_aperto):
                         
+                        # --- IMMAGINE / TUTORIAL ---
+                        img_url = cerca_immagine_esercizio(es)
+                        if img_url:
+                            col1, col2, col3 = st.columns([1, 2, 1])
+                            with col2:
+                                st.image(img_url, use_container_width=True)
+                        else:
+                            st.markdown(
+                                f"<div style='text-align: center; margin-bottom: 15px;'>"
+                                f"<a href='https://www.youtube.com/results?search_query=tutorial+esecuzione+{es.replace(' ', '+')}' "
+                                f"target='_blank' style='text-decoration: none; font-size: 14px; font-weight: bold; color: #e52d27;'>"
+                                f"🎥 Cerca Tutorial YouTube</a></div>", 
+                                unsafe_allow_html=True
+                            )
+                        
+                        # --- SERIE E RIPETIZIONI ---
                         for i in range(st.session_state.contatore_serie[es]):
                             st.markdown(f"**Serie {i + 1}**")
                             c1, c2 = st.columns(2)
@@ -313,7 +344,7 @@ with tab_workout:
                 
                 st.divider()
                 
-                # PULSANTE FINALE DI SALVATAGGIO (Unico per tutto il form)
+                # PULSANTE FINALE DI SALVATAGGIO
                 submit_finale = st.form_submit_button("💾 Consegna Intero Allenamento", type="primary", use_container_width=True)
                 
                 if submit_finale:
@@ -346,7 +377,7 @@ with tab_workout:
                         try:
                             sheet_storico.append_rows(righe_da_inserire, value_input_option='USER_ENTERED')
                             
-                            scarica_dati_fogli.clear() # Sblocca i grafici per aggiornarli
+                            scarica_dati_fogli.clear()
                             
                             st.session_state.dati_salvati = True
                             st.session_state.contatore_serie = {} 
