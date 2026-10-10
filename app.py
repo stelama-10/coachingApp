@@ -2,7 +2,7 @@ import streamlit as st
 import datetime
 import gspread
 import pandas as pd
-import requests  # <-- NUOVA LIBRERIA PER LE API DELLE IMMAGINI
+import requests
 from google.oauth2.service_account import Credentials
 from streamlit_cookies_controller import CookieController
 
@@ -80,31 +80,71 @@ except Exception as e:
     st.stop()
 
 
-# --- 4. SISTEMA ANTI-BLOCCO (CACHE) E RICERCA IMMAGINI ---
+# --- 4. SISTEMI DI CACHE ---
 @st.cache_data(ttl=300)
 def scarica_dati_fogli(_prog, _storico):
     return _prog.get_all_values(), _storico.get_all_values()
 
 dati_programma, dati_storico = scarica_dati_fogli(sheet_programma, sheet_storico)
 
-# Salva la ricerca dell'immagine in memoria per 24 ore
+# Il motore di ricerca immagini ibrido (Database gratuito)
 @st.cache_data(ttl=86400) 
 def cerca_immagine_esercizio(nome_esercizio):
+    nome_lower = nome_esercizio.lower().strip()
+    
+    db_interno = {
+        "lat machine": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Lat-Pulldown.gif",
+        "panca piana": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Barbell-Bench-Press.gif",
+        "spinte": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Incline-Dumbbell-Press.gif",
+        "squat": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Barbell-Squat.gif",
+        "stacco": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Barbell-Deadlift.gif",
+        "trazioni": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Pull-up.gif",
+        "rematore": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Barbell-Row.gif",
+        "curl": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Dumbbell-Curl.gif",
+        "alzate laterali": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Dumbbell-Lateral-Raise.gif",
+        "alzate frontali": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Dumbbell-Front-Raise.gif",
+        "pressa": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Leg-Press.gif",
+        "leg extension": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Leg-Extension.gif",
+        "leg curl": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Leg-Curl.gif",
+        "affondi": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Dumbbell-Lunge.gif",
+        "croci": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Dumbbell-Fly.gif",
+        "lento avanti": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Dumbbell-Shoulder-Press.gif",
+        "french press": "https://fitnessprogramer.com/wp-content/uploads/2021/02/Skull-Crusher.gif"
+    }
+    
+    for chiave, url_gif in db_interno.items():
+        if chiave in nome_lower:
+            return url_gif
+            
+    traduzioni = {
+        "military": "military press", "tricipiti": "triceps extension",
+        "polpacci": "calf", "addominali": "crunch", "crunch": "crunch",
+        "iperestensioni": "hyperextension"
+    }
+    
+    termine_ricerca = nome_lower
+    for ita, eng in traduzioni.items():
+        if ita in nome_lower:
+            termine_ricerca = eng
+            break
+            
     try:
-        url_search = f"https://wger.de/api/v2/exercise/search/?term={nome_esercizio}"
+        url_search = f"https://wger.de/api/v2/exercise/search/?term={termine_ricerca}"
         res = requests.get(url_search, timeout=2)
         if res.status_code == 200:
             dati = res.json()
             if dati.get("suggestions"):
-                ex_id = dati["suggestions"][0]["data"]["id"]
-                url_img = f"https://wger.de/api/v2/exerciseinfo/{ex_id}/"
-                res_img = requests.get(url_img, timeout=2)
-                if res_img.status_code == 200:
-                    dati_img = res_img.json()
-                    if dati_img.get("images"):
-                        return dati_img["images"][0]["image"]
+                for sugg in dati["suggestions"]:
+                    ex_id = sugg["data"]["id"]
+                    url_img = f"https://wger.de/api/v2/exerciseinfo/{ex_id}/"
+                    res_img = requests.get(url_img, timeout=2)
+                    if res_img.status_code == 200:
+                        dati_img = res_img.json()
+                        if dati_img.get("images"):
+                            return dati_img["images"][0]["image"]
     except:
         pass
+        
     return None
 
 
@@ -296,12 +336,14 @@ with tab_workout:
                     
                     with st.expander(titolo_expander, expanded=tieni_aperto):
                         
-                        # --- IMMAGINE / TUTORIAL ---
+                        # --- DATABASE GRATUITO IMMAGINI ---
                         img_url = cerca_immagine_esercizio(es)
                         if img_url:
-                            col1, col2, col3 = st.columns([1, 2, 1])
-                            with col2:
-                                st.image(img_url, use_container_width=True)
+                            st.markdown(f"""
+                                <div style="display: flex; justify-content: center; margin-bottom: 15px;">
+                                    <img src="{img_url}" width="200" style="border-radius: 10px;">
+                                </div>
+                            """, unsafe_allow_html=True)
                         else:
                             st.markdown(
                                 f"<div style='text-align: center; margin-bottom: 15px;'>"
@@ -311,7 +353,6 @@ with tab_workout:
                                 unsafe_allow_html=True
                             )
                         
-                        # --- SERIE E RIPETIZIONI ---
                         for i in range(st.session_state.contatore_serie[es]):
                             st.markdown(f"**Serie {i + 1}**")
                             c1, c2 = st.columns(2)
@@ -344,7 +385,6 @@ with tab_workout:
                 
                 st.divider()
                 
-                # PULSANTE FINALE DI SALVATAGGIO
                 submit_finale = st.form_submit_button("💾 Consegna Intero Allenamento", type="primary", use_container_width=True)
                 
                 if submit_finale:
