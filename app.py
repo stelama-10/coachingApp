@@ -43,14 +43,51 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# --- 1. AUTENTICAZIONE GOOGLE ---
-try:
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-    client = gspread.authorize(credentials)
-except Exception as e:
-    st.error("Errore di autenticazione con Google. Controlla le chiavi segrete.")
-    st.stop()
+# --- 1. AUTENTICAZIONE OAUTH DA CLOUD ---
+scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+client = None
+
+# Cerca se c'è già un token salvato
+if "google_token" in st.secrets:
+    try:
+        from google.oauth2.credentials import Credentials
+        creds = Credentials.from_authorized_user_info(st.secrets["google_token"], scope)
+        client = gspread.authorize(creds)
+    except Exception as e:
+        st.warning(f"Token scaduto o non valido: {e}.")
+
+# Se non c'è il token, avvia il flusso di login manuale
+if client is None:
+    if "gcp_oauth_client" not in st.secrets:
+         st.error("ERRORE: I Secrets non sono configurati su Streamlit Cloud. Manca gcp_oauth_client.")
+         st.stop()
+         
+    from google_auth_oauthlib.flow import Flow
+    flow = Flow.from_client_config(
+        st.secrets["gcp_oauth_client"],
+        scopes=scope,
+        redirect_uri='urn:ietf:wg:oauth:2.0:oob'
+    )
+
+    st.warning("⚠️ L'applicazione deve essere autorizzata (Solo prima volta).")
+    auth_url, _ = flow.authorization_url(prompt='consent')
+    
+    st.markdown(f"1. **[Clicca qui per fare il login admin]({auth_url})**")
+    code = st.text_input("2. Incolla qui il codice di verifica che ti dà Google:")
+    
+    if code:
+        try:
+            flow.fetch_token(code=code)
+            creds_json = flow.credentials.to_json()
+            client = gspread.authorize(flow.credentials)
+            st.success("✅ Loggato! Copia questo testo in basso nei Secrets sotto [google_token].")
+            st.code(creds_json, language="json")
+            st.stop()
+        except Exception as e:
+             st.error(f"Errore: {e}")
+             st.stop()
+    else:
+        st.stop()
 
 # --- 2. RECUPERO ID FOGLIO (AUTOMATICO DA URL O MEMORIA) ---
 id_foglio = st.query_params.get("id")
