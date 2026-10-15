@@ -1,0 +1,15 @@
+[theme]
+# Colore per accenti (bottoni, checkbox attive, slider): Rosso
+primaryColor = "#e52d27"
+
+# Colore di sfondo dell'app: Bianco
+backgroundColor = "#ffffff"
+
+# Colore per le aree secondarie (es. sfondo expander): Bianco scuro / grigio chiarissimo
+secondaryBackgroundColor = "#f1f5f9"
+
+# Colore del testo: Blu molto scuro (per garantire leggibilità sul bianco)
+textColor = "#0f172a"
+
+# Usa il font standard di Streamlit
+font = "sans serif"
