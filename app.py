@@ -17,12 +17,11 @@ st.set_page_config(
 # 2. INIZIALIZZA IL CONTROLLER DEI COOKIE
 controller = CookieController()
 
-# --- BANNER INSTALLAZIONE INTELLIGENTE (AGGIORNATO CON TEMA BLU E ROSSO) ---
+# --- BANNER INSTALLAZIONE INTELLIGENTE ---
 st.markdown("""
     <style>
         .pwa-banner {
-            /* Sfondo a gradiente sui toni del blu */
-            background: linear-gradient(135deg, #1e3a8a, #2563eb);
+            background: linear-gradient(135deg, #0ea5e9, #2563eb);
             color: white;
             padding: 15px;
             border-radius: 10px;
@@ -30,8 +29,6 @@ st.markdown("""
             font-size: 14px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             text-align: center;
-            /* Bordo laterale rosso per l'accento */
-            border-left: 5px solid #e52d27;
         }
         @media all and (display-mode: standalone) {
             .pwa-banner { display: none !important; }
@@ -65,8 +62,7 @@ else:
 
 if not id_foglio:
     st.info("🔄 Sincronizzazione scheda in corso...")
-    # Testo info scuro per visibilità su sfondo bianco
-    st.markdown("<p style='text-align: center; color: #334155; font-size: 12px;'>Se la schermata rimane bloccata, assicurati di aver aperto il link originale inviato dal coach almeno una volta.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray; font-size: 12px;'>Se la schermata rimane bloccata, assicurati di aver aperto il link originale inviato dal coach almeno una volta.</p>", unsafe_allow_html=True)
     st.stop()
 
 try:
@@ -349,7 +345,6 @@ with tab_workout:
                                 </div>
                             """, unsafe_allow_html=True)
                         else:
-                            # Tasto cerca tutorial usa il rosso per risaltare sul bianco
                             st.markdown(
                                 f"<div style='text-align: center; margin-bottom: 15px;'>"
                                 f"<a href='https://www.youtube.com/results?search_query=tutorial+esecuzione+{es.replace(' ', '+')}' "
@@ -390,7 +385,6 @@ with tab_workout:
                 
                 st.divider()
                 
-                # Il pulsante diventerà rosso grazie alla configurazione di theme primaryColor
                 submit_finale = st.form_submit_button("💾 Consegna Intero Allenamento", type="primary", use_container_width=True)
                 
                 if submit_finale:
@@ -412,7 +406,7 @@ with tab_workout:
                                     es,                             
                                     numero_serie,        
                                     rip,          
-                                    str(kg).replace(".", ","),            
+                                    str(kg).replace(".", ","),           
                                     str(tonnellaggio).replace(".", ","),
                                     str(rpe_globale).replace(".", ","),          
                                     feedback_globale          
